@@ -51,7 +51,7 @@ prompt begging.
 
 | | Needed for | Notes |
 |---|---|---|
-| **Go 1.25+** | building | The only build dependency. |
+| **Go 1.25+** | building | Two Go modules: `golang.org/x/sync` and a PDF reader. |
 | **Docker** | Qdrant + reranker | `docker compose up -d` starts both. |
 | **Ollama** | the fully-local path | Optional if you use hosted providers for everything except reranking. |
 | **~2GB VRAM or CPU** | the reranker | `bge-reranker-v2-m3` behind TEI. A CPU image is the default. |
@@ -364,16 +364,89 @@ Drag files onto the page, use *+ Add documents*, or drop them in `corpus/`.
 | Type | Handling |
 |---|---|
 | `.md` `.markdown` `.txt` | indexed as-is |
-| `.docx` | heading styles become markdown headings (`Title` parents `Heading 1`); tables keep their columns |
-| `.pptx` | one section per slide, in numeric order |
-| `.xlsx` | one section per sheet, rows as pipe-separated cells, shared strings resolved |
+| `.csv` `.tsv` `.tab` | markdown table; quoted delimiters, embedded newlines, doubled quotes and BOMs handled |
+| `.pdf` | one section per page, in reading order; text and line grouping only — see below |
+| `.docx` | heading styles become markdown headings (`Title` parents `Heading 1`); tables become markdown tables; charts extracted |
+| `.pptx` | one section per slide in numeric order; slide tables become markdown tables; charts extracted |
+| `.xlsx` | one section per sheet, shared strings resolved; charts extracted |
 | `.doc` `.ppt` `.xls` | rejected with a message — the pre-2007 binary formats are not ZIP archives |
 
-Office files are ZIP + XML, so this is `archive/zip` and `encoding/xml` from the
-standard library — **no document-parsing dependency**. Extraction targets
-markdown rather than flat text on purpose: the chunker splits on headings, so a
-Word heading or slide boundary becoming a real `##` is what keeps chunks aligned
-to the document's own structure.
+### Tables
+
+Tables are rendered as markdown rather than flattened, because the header is
+what makes a retrieved row mean anything: `8 | Motor Controller` is noise on its
+own, while a markdown table keeps every value under its column name for both
+the embedder and the model. Ragged rows are padded so a short row cannot shift
+later cells under the wrong header, and literal `|` is escaped.
+
+### Charts
+
+A chart looks like it has no text, but OOXML stores a **cache of the series it
+was plotted from** — categories and values — inside `charts/chartN.xml`, so the
+chart can render without reopening its source workbook. That cache is the data,
+so charts become tables with no image processing and no dependency:
+
+```
+## Charts
+
+### Revenue by Quarter (bar)
+
+|    | 2025 | 2026 |
+| --- | --- | --- |
+| Q1 | 120 | 200 |
+| Q2 | 150 | 260 |
+```
+
+Charts are appended as their own `## Charts` section rather than placed inline:
+the drawing-to-chart relationship chain differs per format, and a chart under
+the wrong heading is worse than one under an honest heading.
+
+⚠️ **A chart pasted in as a picture is pixels, and this does not read it.**
+Neither are scanned pages, photographed tables, or diagrams and flowcharts —
+those carry their meaning in layout, not in any cached series. Reading them
+needs a vision model over rendered pages, which is the deliberately deferred
+visual pipeline below. If a document's numbers only exist inside a screenshot,
+they will not be retrievable.
+
+### PDF
+
+Text and page structure extract well; charts do not, and cannot.
+
+**A PDF has no chart data.** The Office trick above works because OOXML caches
+the plotted numbers inside the file. A PDF chart is drawing operations or a
+raster image — there is no equivalent cache anywhere in the format. Its title,
+axis labels and legend come through as ordinary text; **the values do not**,
+because the bars are literally just lines. No amount of better PDF parsing
+changes this; it needs a vision model.
+
+Two more PDF-specific limits worth knowing:
+
+- **Tables are line-grouped, not column-parsed.** Runs sharing a baseline are
+  joined, so `Quad copter frame F450 4 FRAME` stays on one row and keeps its
+  values together — but the column boundaries are not recovered, so PDF tables
+  do not become markdown tables the way Word and PowerPoint tables do.
+- **Scanned PDFs have no text layer.** Rather than indexing an empty document,
+  ingest fails with a message naming the actual problem and pointing at OCR.
+
+Reading order is derived per page rather than assumed. Rows carry a transformed
+Y whose direction depends on the producer — a Chrome-printed page reports its
+title at 37 and its footer at 224 (Y down), while the same file's user space
+puts the title at 736 (Y up). Hardcoding either direction indexes half the
+world's PDFs bottom-first, which buries the title: the strongest signal a
+document has.
+
+Office files are ZIP + XML, so Word, PowerPoint, Excel, CSV and chart
+extraction are `archive/zip`, `encoding/xml` and `encoding/csv` from the
+standard library. **PDF is the one exception** and pulls in
+[`ledongthuc/pdf`](https://github.com/ledongthuc/pdf): a PDF is a
+cross-referenced object graph with its own compression, font encodings and CMap
+tables, and a hand-rolled reader garbles real files rather than failing
+cleanly — garbled text produces confident wrong answers, which is the one
+outcome this project is built to avoid.
+
+Extraction targets markdown rather than flat text on purpose: the chunker
+splits on headings, so a Word heading, a slide boundary or a PDF page becoming
+a real `##` is what keeps chunks aligned to the document's own structure.
 
 Uploaded filenames are untrusted input, so they are **sanitised rather than
 cleaned**: directory components stripped, extension must be one that is

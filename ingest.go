@@ -245,6 +245,8 @@ func (a *App) IngestDir(ctx context.Context, dir string, acl []string) (int, int
 var docExtensions = map[string]bool{
 	".md": true, ".markdown": true, ".txt": true,
 	".docx": true, ".pptx": true, ".xlsx": true,
+	".csv": true, ".tsv": true, ".tab": true,
+	".pdf": true,
 }
 
 func isDoc(path string) bool { return docExtensions[strings.ToLower(filepath.Ext(path))] }

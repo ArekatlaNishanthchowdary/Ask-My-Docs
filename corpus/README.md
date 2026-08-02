@@ -1,7 +1,7 @@
 # Put your documents here
 
-`ingest -dir corpus` indexes every `.md`, `.markdown`, `.txt`, `.docx`,
-`.pptx` and `.xlsx` file under this directory, recursively. Subdirectories are fine — the path relative to `-dir`
+`ingest -dir corpus` indexes every `.md`, `.markdown`, `.txt`, `.csv`, `.tsv`,
+`.tab`, `.pdf`, `.docx`, `.pptx` and `.xlsx` file under this directory, recursively. Subdirectories are fine — the path relative to `-dir`
 becomes the document id, so `handbook/billing.md` is indexed under that name.
 
 Chunking is heading-aware, so documents that use `#`/`##` headings chunk along
@@ -13,6 +13,11 @@ same chunking: Word heading styles become headings (with `Title` as the parent
 of `Heading 1`), each PowerPoint slide becomes a section, and each Excel sheet
 becomes a section with rows as pipe-separated lines. Word tables keep their
 columns rather than being flattened into prose.
+
+Tables become markdown tables so each value keeps its column name, and charts
+are read from the series cache OOXML stores inside them — a bar chart becomes a
+table of its own numbers. A chart pasted in as a *picture*, or a scanned page,
+is pixels and is not readable without a vision model.
 
 The pre-2007 binary formats (`.doc`, `.ppt`, `.xls`) are not readable — they are
 not ZIP archives. Re-save them as `.docx`/`.pptx`/`.xlsx`; you get a clear error

@@ -44,6 +44,12 @@ func LoadDocumentText(name string, data []byte) (string, error) {
 		return extractPptx(data)
 	case ".xlsx":
 		return extractXlsx(data)
+	case ".pdf":
+		return extractPDF(data)
+	case ".csv":
+		return extractCSV(data, ',')
+	case ".tsv", ".tab":
+		return extractCSV(data, '\t')
 	case ".md", ".markdown", ".txt":
 		if !utf8.Valid(data) {
 			return "", fmt.Errorf("not valid UTF-8 text")
@@ -99,6 +105,7 @@ func extractDocx(data []byte) (string, error) {
 	level := 0 // heading level of the current paragraph, 0 = body text
 	inCell := false
 	var row []string
+	var tblRows [][]string
 
 	// Word's "Title" style sits above "Heading 1" but both would map to level 1,
 	// so a Heading 1 would replace the title in the section path instead of
@@ -136,6 +143,8 @@ func extractDocx(data []byte) (string, error) {
 				para.WriteString("\t")
 			case "br", "cr":
 				para.WriteString("\n")
+			case "tbl":
+				tblRows = nil
 			case "tc":
 				inCell = true
 			case "tr":
@@ -169,14 +178,23 @@ func extractDocx(data []byte) (string, error) {
 				inCell = false
 			case "tr":
 				if len(row) > 0 {
-					// Table rows keep their shape as pipe-separated cells: a row
-					// read back as a sentence is how table meaning gets lost.
-					out = append(out, strings.Join(row, " | "))
+					// Buffered rather than emitted per row: the table is only
+					// complete at </w:tbl>, and a header row is only a header
+					// once the rows under it exist to be headed.
+					tblRows = append(tblRows, append([]string(nil), row...))
 					row = nil
 				}
+			case "tbl":
+				// A row read back as a sentence is how table meaning gets lost;
+				// markdown keeps each value under its column name.
+				if md := markdownTable(tblRows); md != "" {
+					out = append(out, md)
+				}
+				tblRows = nil
 			}
 		}
 	}
+	out = append(out, extractCharts(zr)...)
 	return joinBlocks(out), nil
 }
 
@@ -224,14 +242,78 @@ func extractPptx(data []byte) (string, error) {
 		if err != nil {
 			continue
 		}
-		lines, err := textRuns(body, "t")
+		lines, err := slideBlocks(body)
 		if err != nil {
 			return "", err
 		}
 		out = append(out, fmt.Sprintf("## Slide %d", s.n))
 		out = append(out, lines...)
 	}
+	out = append(out, extractCharts(zr)...)
 	return joinBlocks(out), nil
+}
+
+// slideBlocks pulls a slide's text in reading order, keeping tables as tables.
+//
+// Pulling every <a:t> flat — which is what this used to do — turns a 4x3 table
+// into twelve loose strings: the row and column a number belonged to is gone,
+// and "8" no longer means "8 of the ESC controller". Tables are where slides
+// put their densest facts, so they are worth the walk.
+func slideBlocks(body []byte) ([]string, error) {
+	var out []string
+	var rows [][]string
+	var row []string
+	var cell strings.Builder
+	var inTable, inCell bool
+
+	dec := xml.NewDecoder(bytes.NewReader(body))
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			return out, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("malformed Office XML: %w", err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch t.Name.Local {
+			case "tbl":
+				inTable, rows = true, nil
+			case "tr":
+				row = nil
+			case "tc":
+				inCell = true
+				cell.Reset()
+			case "t":
+				var s string
+				if dec.DecodeElement(&s, &t) != nil {
+					continue
+				}
+				switch {
+				case inCell:
+					cell.WriteString(s)
+				case !inTable:
+					if s = strings.TrimSpace(s); s != "" {
+						out = append(out, s)
+					}
+				}
+			}
+		case xml.EndElement:
+			switch t.Name.Local {
+			case "tc":
+				inCell = false
+				row = append(row, cell.String())
+			case "tr":
+				rows = append(rows, row)
+			case "tbl":
+				inTable = false
+				if md := markdownTable(rows); md != "" {
+					out = append(out, md)
+				}
+			}
+		}
+	}
 }
 
 // textRuns pulls the character data of every element with the given local name,
@@ -328,6 +410,7 @@ func extractXlsx(data []byte) (string, error) {
 	if len(out) == 0 {
 		return "", fmt.Errorf("spreadsheet contains no readable cells")
 	}
+	out = append(out, extractCharts(zr)...)
 	return joinBlocks(out), nil
 }
 
