@@ -548,6 +548,12 @@ func main() {
 		run(ctx, cfg, cmdEval)
 	case "calibrate":
 		run(ctx, cfg, cmdCalibrate)
+	case "detect":
+		// Offline and service-free by design: it runs before `docker compose
+		// up`, which is the whole point.
+		if err := cmdDetect(os.Args[2:]); err != nil {
+			log.Fatalf("error: %v", err)
+		}
 	case "chunks":
 		// Offline: no API keys, no services. Used to tune chunk boundaries and
 		// to read off the chunk ids that the golden eval set has to reference.
@@ -622,6 +628,7 @@ func usage() {
   eval     Run the golden eval set and gate on regressions
   calibrate Derive MIN_RERANK_SCORE from the golden set
   chunks   Print chunk boundaries and ids for a directory (offline, no keys)
+  detect   Pick the reranker image for this machine's GPU and write it to .env
   version  Print the build version
 
 Run "<command> -h" for flags.

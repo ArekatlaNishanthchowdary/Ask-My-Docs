@@ -20,13 +20,19 @@ services:
   # LLM scoring passages, which measured ~23x slower and miscalibrated badly
   # enough to score a correct rank-1 chunk 0.00. Point RERANKER_URL at it.
   #
-  # Defaults to the CPU image so it starts anywhere. For GPU, set TEI_IMAGE to
-  # the tag matching your compute capability and uncomment the `deploy` block —
-  # a mismatched tag fails at startup with "Runtime compute cap N is not
+  # Defaults to the CPU image so it starts anywhere, including machines with no
+  # NVIDIA GPU. To use a GPU, run `ask-my-docs detect` — it reads the compute
+  # capability off the driver, picks the matching tag, checks that Docker can
+  # actually pass the device through, and writes TEI_IMAGE and COMPOSE_FILE
+  # into .env so `docker compose up -d` layers docker-compose.gpu.yml on top.
+  #
+  # Doing it by hand instead: set TEI_IMAGE and add -f docker-compose.gpu.yml.
+  # A mismatched tag fails at startup with "Runtime compute cap N is not
   # compatible", which is at least loud:
   #   turing-1.7   7.5   RTX 20xx, T4
+  #   1.7          8.0   A100, A30
   #   86-1.7       8.6   RTX 30xx, A10
-  #   89-1.7       8.9   RTX 40xx
+  #   89-1.7       8.9   RTX 40xx, L4
   #   hopper-1.7   9.0   H100
   #
   # RERANKER_MODEL: any cross-encoder on the Hub. bge-reranker-v2-m3 (568M) is
@@ -40,17 +46,6 @@ services:
       - tei_cache:/data
     environment:
       HF_HOME: /data
-    # GPU reservation. Enabled because this machine has an NVIDIA GPU and
-    # TEI_IMAGE is set to a CUDA tag in .env. On a machine without one, comment
-    # this block out and set TEI_IMAGE=cpu-1.7 — leaving it enabled fails
-    # loudly at startup, which beats silently running the CPU build.
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
 
 volumes:
   qdrant_storage:

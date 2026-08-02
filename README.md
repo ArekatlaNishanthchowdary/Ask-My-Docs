@@ -124,18 +124,49 @@ OLLAMA_CHAT_MODEL=qwen2.5:7b
 docker compose up -d            # Qdrant :6333, reranker :8081
 ```
 
-The reranker defaults to a **CPU image** so it runs anywhere. For GPU, set
-`TEI_IMAGE` to your compute capability and uncomment the `deploy:` block in
-`docker-compose.yml`:
+The reranker defaults to a **CPU image**, so this starts on any machine. To use
+a GPU, let the binary work it out:
 
-| GPU | `TEI_IMAGE` |
-|---|---|
-| RTX 40xx (Ada, 8.9) | `89-1.7` |
-| RTX 30xx (Ampere, 8.6) | `86-1.7` |
-| RTX 20xx (Turing, 7.5) | `turing-1.7` |
-| CPU / anything else | `cpu-1.7` |
+```bash
+./ask-my-docs detect        # add -n to see the decision without writing
+```
 
-A mismatched tag fails loudly at startup rather than silently falling back.
+It reads the compute capability off the driver, picks the matching TEI tag,
+checks that Docker can actually pass the device through, and writes
+`TEI_IMAGE`, `COMPOSE_FILE` and `COMPOSE_PATH_SEPARATOR` into `.env` — so plain
+`docker compose up -d` then layers `docker-compose.gpu.yml` on top.
+
+```
+GPU:      NVIDIA GeForce RTX 4060 Laptop GPU (compute 8.9)
+Reranker: 89-1.7
+Compose:  docker-compose.yml + docker-compose.gpu.yml
+```
+
+| Compute | `TEI_IMAGE` | GPUs |
+|---|---|---|
+| 9.0 | `hopper-1.7` | H100, H200 |
+| 8.9 | `89-1.7` | RTX 40xx, L4, L40S |
+| 8.6 | `86-1.7` | RTX 30xx, A10, A40 |
+| 8.0 | `1.7` | A100, A30 |
+| 7.5 | `turing-1.7` | RTX 20xx, T4 |
+| anything else | `cpu-1.7` | including Blackwell — newer than any TEI 1.7 tag |
+
+Two failure modes `detect` exists to prevent. A mismatched tag fails at startup
+with *"Runtime compute cap N is not compatible"* — loud, but only after you've
+pulled a multi-GB image. And a **working `nvidia-smi` says nothing about
+whether Docker can use the GPU**: without the NVIDIA Container Toolkit the
+reservation fails at `up` time with an error about device driver `nvidia` that
+reads like a Docker bug rather than a missing package. `detect` checks for it
+and falls back to CPU with the install link instead.
+
+The GPU reservation lives in `docker-compose.gpu.yml` rather than the base
+file, because a `deploy.resources.devices` block is fatal on a host with no
+NVIDIA runtime — a base file that only starts on GPU machines is the wrong
+default for a project people clone. To do it by hand:
+
+```bash
+TEI_IMAGE=89-1.7 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+```
 
 ### 4. Add documents and index
 
@@ -276,6 +307,7 @@ answers as an upper bound, not a measurement.
 | `eval [-verbose] [-update-baseline]` | Run the golden set, print metrics, fail on regression. |
 | `calibrate` | Derive `MIN_RERANK_SCORE` from the golden set instead of guessing. |
 | `chunks -dir DIR [-text]` | Print chunk boundaries and ids. Offline — no keys, no services. |
+| `detect` | Detect the GPU, pick the reranker image, write it to `.env`. Offline. |
 | `version` | Print the build version (`dev` for a local `go build`). |
 
 ## HTTP API

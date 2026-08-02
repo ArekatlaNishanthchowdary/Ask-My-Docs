@@ -1,0 +1,21 @@
+# GPU overlay for the reranker. Layered on top of docker-compose.yml rather
+# than living inside it, because a `deploy.resources.devices` reservation is
+# fatal on a machine with no NVIDIA runtime — a base file that only starts on
+# GPU hosts is the wrong default for a project people clone.
+#
+# `ask-my-docs detect` sets COMPOSE_FILE in .env so plain `docker compose up -d`
+# picks this up. Explicitly:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# TEI_IMAGE must also be a CUDA tag; the CPU image ignores the device and the
+# reservation then reserves a GPU for nothing.
+services:
+  reranker:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

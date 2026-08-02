@@ -53,7 +53,7 @@ jobs:
             -o "dist/$name/ask-my-docs${{ matrix.ext }}" .
           # The support files are the difference between "a binary" and
           # "something a stranger can actually run".
-          cp README.md LICENSE .env.example docker-compose.yml "dist/$name/"
+          cp README.md LICENSE .env.example docker-compose.yml docker-compose.gpu.yml "dist/$name/"
           cp corpus/README.md "dist/$name/corpus/"
 
       - name: Package
