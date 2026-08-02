@@ -1,0 +1,93 @@
+name: eval
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  # Unit tests plus the Qdrant wire-format integration tests, which use
+  # synthetic vectors and need no API keys. Always runs, forks included.
+  unit:
+    runs-on: ubuntu-latest
+    services:
+      qdrant:
+        image: qdrant/qdrant:v1.12.4
+        ports: ["6333:6333"]
+        options: >-
+          --health-cmd "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333'"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      QDRANT_TEST_URL: http://localhost:6333
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      - run: go vet ./...
+      - run: go test ./...
+      - run: go build ./...
+
+  # Quality + performance gate. Runs the real pipeline against a real index.
+  #
+  # This job uses PROVIDER=cloud: GitHub-hosted runners have no GPU, so a local
+  # 7B would take tens of minutes per run. To gate the local stack instead, move
+  # this job to a self-hosted runner with Ollama and set PROVIDER=ollama — the
+  # baseline is provider-specific, so regenerate eval/baseline.json when you do.
+  eval:
+    runs-on: ubuntu-latest
+    needs: unit
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push'
+    services:
+      qdrant:
+        image: qdrant/qdrant:v1.12.4
+        ports: ["6333:6333"]
+        options: >-
+          --health-cmd "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333'"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      PROVIDER: cloud
+      QDRANT_URL: http://localhost:6333
+      VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: Build
+        run: go build -o ask-my-docs .
+
+      # A repo with no golden items has nothing to gate. Skip loudly rather
+      # than failing red — or worse, passing green and implying the quality
+      # gate ran when it did not.
+      - name: Check for eval items
+        id: golden
+        run: |
+          n=$(grep -cve '^\s*$' -e '^\s*//' eval/golden.jsonl || true)
+          echo "count=$n" >> "$GITHUB_OUTPUT"
+          if [ "$n" -eq 0 ]; then
+            echo "::warning::eval/golden.jsonl is empty — the quality gate is NOT running."
+          fi
+
+      - name: Index the corpus
+        if: steps.golden.outputs.count != '0'
+        run: ./ask-my-docs ingest -dir corpus
+
+      # Fails the build if any gated metric regresses more than the tolerance
+      # against eval/baseline.json. Regenerate a baseline deliberately with:
+      #   ./ask-my-docs eval -update-baseline
+      - name: Run gated eval
+        if: steps.golden.outputs.count != '0'
+        run: ./ask-my-docs eval -out metrics.json -tolerance 0.02
+
+      # Kept regardless of outcome so regressions are diffable across runs.
+      - name: Upload metrics
+        if: always() && steps.golden.outputs.count != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-metrics-${{ github.sha }}
+          path: metrics.json

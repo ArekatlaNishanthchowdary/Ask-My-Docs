@@ -1,0 +1,22 @@
+# Build output
+ask-my-docs
+ask-my-docs.exe
+ask-my-docs.exe~
+
+# Secrets. Never commit this — .env.example is the template.
+.env
+
+# Your documents are yours. Everything under corpus/ is ignored except the
+# README explaining what goes there, so a clone starts empty and nobody
+# publishes their own corpus by accident.
+corpus/*
+!corpus/README.md
+
+# Eval artifacts. baseline.json is config-specific and not comparable across
+# backends, so it is generated locally rather than shared.
+metrics.json
+eval/baseline.json
+
+# Runtime logs
+*.log
+serve.err
