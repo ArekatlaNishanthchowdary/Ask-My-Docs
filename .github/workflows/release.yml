@@ -1,0 +1,93 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  # Lets you re-package an existing tag without moving it.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and upload (e.g. v0.10.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  # A bare binary is not a usable release: it starts, fails on the first unset
+  # variable, and the user has no .env.example to copy and no compose file to
+  # bring up Qdrant and the reranker. Each archive therefore ships the binary
+  # together with everything needed to run it.
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64 }
+          - { goos: linux,   goarch: arm64 }
+          - { goos: darwin,  goarch: amd64 }
+          - { goos: darwin,  goarch: arm64 }
+          - { goos: windows, goarch: amd64, ext: .exe }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: Resolve tag
+        id: tag
+        run: echo "ref=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          name="ask-my-docs-${{ steps.tag.outputs.ref }}-${GOOS}-${GOARCH}"
+          mkdir -p "dist/$name/corpus"
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${{ steps.tag.outputs.ref }}" \
+            -o "dist/$name/ask-my-docs${{ matrix.ext }}" .
+          # The support files are the difference between "a binary" and
+          # "something a stranger can actually run".
+          cp README.md LICENSE .env.example docker-compose.yml "dist/$name/"
+          cp corpus/README.md "dist/$name/corpus/"
+
+      - name: Package
+        id: pkg
+        run: |
+          set -euo pipefail
+          name="ask-my-docs-${{ steps.tag.outputs.ref }}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          cd dist
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            zip -qr "$name.zip" "$name"; echo "file=dist/$name.zip" >> "$GITHUB_OUTPUT"
+          else
+            tar -czf "$name.tar.gz" "$name"; echo "file=dist/$name.tar.gz" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ steps.pkg.outputs.file }}
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+
+      # One checksum file for the whole release, so a download can be verified
+      # without trusting the transport.
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"

@@ -58,13 +58,38 @@ prompt begging.
 
 No API key is required for the fully-local path.
 
-## Quick start
+## Install
 
-### 1. Clone and configure
+### From a release (no Go toolchain needed)
+
+Download the archive for your platform from
+[Releases](https://github.com/ArekatlaNishanthchowdary/Ask-My-Docs/releases),
+unpack it, and you have the binary **plus** the files it needs to run:
+`.env.example`, `docker-compose.yml`, `README.md`, `LICENSE`.
 
 ```bash
-git clone https://github.com/<you>/ask-my-docs.git
-cd ask-my-docs
+tar -xzf ask-my-docs-v0.10.1-linux-amd64.tar.gz
+cd ask-my-docs-v0.10.1-linux-amd64
+sha256sum -c --ignore-missing SHA256SUMS.txt   # optional, verify the download
+./ask-my-docs version
+```
+
+Then continue from step 1 below — skip the `git clone`, you already have
+everything.
+
+### From source
+
+```bash
+git clone https://github.com/ArekatlaNishanthchowdary/Ask-My-Docs.git
+cd Ask-My-Docs
+go build -o ask-my-docs .
+```
+
+## Quick start
+
+### 1. Configure
+
+```bash
 cp .env.example .env
 ```
 
@@ -97,7 +122,6 @@ OLLAMA_CHAT_MODEL=qwen2.5:7b
 
 ```bash
 docker compose up -d            # Qdrant :6333, reranker :8081
-go build -o ask-my-docs .
 ```
 
 The reranker defaults to a **CPU image** so it runs anywhere. For GPU, set
@@ -252,6 +276,7 @@ answers as an upper bound, not a measurement.
 | `eval [-verbose] [-update-baseline]` | Run the golden set, print metrics, fail on regression. |
 | `calibrate` | Derive `MIN_RERANK_SCORE` from the golden set instead of guessing. |
 | `chunks -dir DIR [-text]` | Print chunk boundaries and ids. Offline — no keys, no services. |
+| `version` | Print the build version (`dev` for a local `go build`). |
 
 ## HTTP API
 

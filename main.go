@@ -521,6 +521,11 @@ func loadDotEnv(path string) {
 	}
 }
 
+// version is stamped by the release workflow with -X main.version=<tag>. A
+// plain `go build` leaves it "dev" — which is itself the useful answer when
+// someone reports a bug against a binary nobody can identify.
+var version = "dev"
+
 func main() {
 	log.SetFlags(0)
 	if len(os.Args) < 2 {
@@ -531,6 +536,8 @@ func main() {
 	ctx := context.Background()
 
 	switch os.Args[1] {
+	case "version", "-v", "--version":
+		fmt.Println(version)
 	case "serve":
 		run(ctx, cfg, cmdServe)
 	case "ingest":
@@ -615,6 +622,7 @@ func usage() {
   eval     Run the golden eval set and gate on regressions
   calibrate Derive MIN_RERANK_SCORE from the golden set
   chunks   Print chunk boundaries and ids for a directory (offline, no keys)
+  version  Print the build version
 
 Run "<command> -h" for flags.
 `)
