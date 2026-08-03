@@ -40,6 +40,7 @@ type Config struct {
 	LLMProvider           string
 	JudgeProvider         string
 	VerifyProvider        string
+	VerifyModel           string
 	OpenAIBaseURL         string
 	OpenAIKey             string
 	OpenAIModel           string
@@ -103,6 +104,11 @@ func LoadConfig() Config {
 		LLMProvider:    os.Getenv("LLM_PROVIDER"),
 		JudgeProvider:  os.Getenv("JUDGE_PROVIDER"),
 		VerifyProvider: os.Getenv("VERIFY_PROVIDER"),
+		// Naming the verifier's model separately is what lets it differ from the
+		// generator on the *same* endpoint — otherwise both stages collapse onto
+		// that provider's single configured model, and the second opinion the
+		// verifier exists to give comes from the model that wrote the claim.
+		VerifyModel: os.Getenv("VERIFY_MODEL"),
 		// Defaults to Groq; point OPENAI_BASE_URL at OpenRouter, Together,
 		// Fireworks, vLLM or LM Studio to use those instead.
 		OpenAIBaseURL:         env("OPENAI_BASE_URL", "https://api.groq.com/openai/v1"),
@@ -404,10 +410,10 @@ func NewApp(cfg Config) (*App, error) {
 	// at local hardware removes that pressure and uses a GPU that is otherwise
 	// idle between queries.
 	a.Verifier = a.LLM
-	if cfg.VerifyProvider != "" {
-		v, _, err := buildLLM(cfg, cfg.VerifyProvider, "")
+	if cfg.VerifyProvider != "" || cfg.VerifyModel != "" {
+		v, _, err := buildLLM(cfg, firstNonEmpty(cfg.VerifyProvider, cfg.LLMProvider), cfg.VerifyModel)
 		if err != nil {
-			return nil, fmt.Errorf("VERIFY_PROVIDER: %w", err)
+			return nil, fmt.Errorf("VERIFY_PROVIDER/VERIFY_MODEL: %w", err)
 		}
 		a.Verifier = v
 	}
@@ -431,6 +437,9 @@ func NewApp(cfg Config) (*App, error) {
 	// than re-deriving it from config that a runtime switch may have outgrown.
 	a.llmName = describeStage(cfg, cfg.LLMProvider)
 	a.verifyName = describeStage(cfg, firstNonEmpty(cfg.VerifyProvider, cfg.LLMProvider))
+	if cfg.VerifyModel != "" {
+		a.verifyName.Model = cfg.VerifyModel
+	}
 	a.judgeName = describeStage(cfg, firstNonEmpty(cfg.JudgeProvider, cfg.LLMProvider))
 	if cfg.JudgeProvider == "openai" && cfg.OpenAIJudgeModel != "" {
 		a.judgeName.Model = cfg.OpenAIJudgeModel
