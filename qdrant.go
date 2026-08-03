@@ -207,6 +207,18 @@ func DocIDFilter(docID string) map[string]any {
 	}
 }
 
+// DocVersionFilter matches one document's chunks only at one version, which is
+// how ingest asks "is this file already indexed as it is on disk right now?"
+// without fetching a payload.
+func DocVersionFilter(docID, version string) map[string]any {
+	return map[string]any{
+		"must": []map[string]any{
+			{"key": "doc_id", "match": map[string]any{"value": docID}},
+			{"key": "version", "match": map[string]any{"value": version}},
+		},
+	}
+}
+
 // pointID maps a stable string key onto the UUID shape Qdrant requires, so
 // re-ingesting a document overwrites its chunks instead of duplicating them.
 func pointID(key string) string {

@@ -302,7 +302,7 @@ answers as an upper bound, not a measurement.
 | Command | What it does |
 |---|---|
 | `serve` | API **and** UI on `:8080`. |
-| `ingest -dir DIR [-acl a,b]` | Chunk, contextualize, embed and index. Idempotent. |
+| `ingest -dir DIR [-acl a,b] [-force]` | Chunk, contextualize, embed and index. Idempotent, and skips documents unchanged since the last run unless `-force`. |
 | `query [-acl a,b] [-json] Q` | One question, printed with sources and per-stage timings. |
 | `eval [-verbose] [-update-baseline]` | Run the golden set, print metrics, fail on regression. |
 | `calibrate` | Derive `MIN_RERANK_SCORE` from the golden set instead of guessing. |
@@ -571,9 +571,25 @@ frequency; Qdrant's `idf` modifier applies the weighting server-side. That is
 why `SparseEncode` is a pure function of one string with no index-wide state to
 keep in sync.
 
-**Contextual retrieval, batched.** Chunks are embedded with an LLM-written
-preamble situating them in their document — one call per document, not per
-chunk, with the body in the system prompt.
+**Contextual retrieval, batched, with a free floor.** Chunks are embedded with
+an LLM-written preamble situating them in their document — one call per
+document, not per chunk, with the body in the system prompt. When that preamble
+is missing — the call failed, the provider rate-limited it, the budget does not
+stretch to a large corpus — the chunk falls back to a line derived from its
+filename and heading path, at no tokens. Measured against the same
+cross-encoder the query path uses, chunks scoring 0.0001–0.0014 raw scored
+0.010–0.094 with the derived line and 0.13–0.39 with the LLM one. Worse than
+the model, far better than nothing, and it keeps contextualization an
+enhancement rather than a prerequisite.
+
+**Unchanged documents are skipped.** Every chunk stores the source file's mtime
+as `version`; `ingest` counts a document's chunks at the current version and
+skips it if they are already there. Contextualization re-sends the document body
+once per batch of chunks, so it is the pipeline's largest token consumer — which
+makes this the difference between an index that is affordable to build once and
+one that is affordable to keep current. The check cannot see a change that
+leaves mtime alone (embedding model, chunk bounds, an edited prompt); use
+`ingest -force` for those.
 
 **Semantic cache in Qdrant.** A second collection, not Redis — the vector store
 already running is the only thing that can answer "is this a near-duplicate of

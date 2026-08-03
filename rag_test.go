@@ -322,3 +322,19 @@ func TestKeepEntailedDropsOnlyUnsupportedClaims(t *testing.T) {
 		t.Errorf("keepEntailed overwrote its input: claims[0] = %q", claims[0].Text)
 	}
 }
+
+func TestFallbackContextNamesTheDocument(t *testing.T) {
+	// The point of the fallback is that a filename usually carries the entity a
+	// chunk refers to only by pronoun, so the separators have to become words.
+	got := fallbackContext("Arekatla_Nishanth_Chowdary_Resume-Viasat.docx", "Education")
+	want := `From the document "Arekatla Nishanth Chowdary Resume Viasat", section "Education".`
+	if got != want {
+		t.Errorf("fallbackContext = %q, want %q", got, want)
+	}
+
+	// Chunks before the first heading have no section; the line must still be
+	// a well-formed sentence rather than a dangling "section".
+	if got := fallbackContext("notes/q3 plan.md", ""); got != `From the document "q3 plan".` {
+		t.Errorf("sectionless fallbackContext = %q", got)
+	}
+}

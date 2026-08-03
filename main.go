@@ -1127,12 +1127,18 @@ func cmdIngest(ctx context.Context, a *App, args []string) error {
 	fs := flag.NewFlagSet("ingest", flag.ExitOnError)
 	dir := fs.String("dir", a.Cfg.CorpusDir, "directory of .md/.txt documents to index")
 	acl := fs.String("acl", "", "comma-separated ACL tags applied to every chunk")
+	// Unchanged files are skipped by default because re-indexing them is pure
+	// cost for an identical result. Anything that changes how a document should
+	// be indexed rather than the document itself — embedding model, chunk
+	// bounds, contextualization prompt — is invisible to that check and needs
+	// this flag.
+	force := fs.Bool("force", false, "re-index every document, including ones unchanged since the last run")
 	_ = fs.Parse(args)
 	if err := a.EnsureCollections(ctx); err != nil {
 		return err
 	}
 	start := time.Now()
-	docs, chunks, err := a.IngestDir(ctx, *dir, splitCSV(*acl))
+	docs, skipped, chunks, err := a.IngestDir(ctx, *dir, splitCSV(*acl), *force)
 	if err != nil {
 		return err
 	}
@@ -1143,7 +1149,11 @@ func cmdIngest(ctx context.Context, a *App, args []string) error {
 			fmt.Fprintf(os.Stderr, "warn: could not clear the semantic cache: %v\n", err)
 		}
 	}
-	fmt.Printf("indexed %d documents, %d chunks in %s\n", docs, chunks, time.Since(start).Round(time.Millisecond))
+	fmt.Printf("indexed %d documents, %d chunks in %s", docs, chunks, time.Since(start).Round(time.Millisecond))
+	if skipped > 0 {
+		fmt.Printf(" (%d unchanged, skipped — -force to re-index)", skipped)
+	}
+	fmt.Println()
 	return nil
 }
 
