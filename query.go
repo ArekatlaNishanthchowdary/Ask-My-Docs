@@ -181,18 +181,25 @@ func (a *App) Query(ctx context.Context, req QueryRequest) (QueryResponse, error
 	}
 	resp.Timings.Verify = ms(t)
 
-	for i, ok := range entailed {
-		if !ok {
-			// An unentailed claim means the model cited something that does not
-			// actually support it — exactly the hallucination this stage exists
-			// to catch. Refuse rather than emit a plausible-looking falsehood.
-			resp.Warnings = append(resp.Warnings,
-				fmt.Sprintf("claim %d not entailed by its citations", i))
-			resp.Answer = insufficientAnswer
-			resp.Timings.Total = ms(start)
-			return resp, nil
-		}
+	// An unentailed claim means the model cited something that does not actually
+	// support it — exactly the hallucination this stage exists to catch — so it
+	// is dropped and never reaches the user. Dropping it rather than refusing
+	// the whole answer is the same policy the citation check above already
+	// applies, and it matters because verification is per-claim: a thorough
+	// answer runs the verifier eight or nine times, so an all-or-nothing rule
+	// refuses long answers more often than short ones even when every claim is
+	// sound. If nothing survives, there is no answer left and we refuse.
+	verified, dropped := keepEntailed(ans.Claims, entailed)
+	for _, i := range dropped {
+		resp.Warnings = append(resp.Warnings,
+			fmt.Sprintf("dropped claim %d, not entailed by its citations", i))
 	}
+	if len(verified) == 0 {
+		resp.Answer = insufficientAnswer
+		resp.Timings.Total = ms(start)
+		return resp, nil
+	}
+	ans.Claims = verified
 
 	resp.Sufficient = true
 	resp.Claims = ans.Claims
@@ -203,6 +210,26 @@ func (a *App) Query(ctx context.Context, req QueryRequest) (QueryResponse, error
 		a.cachePut(ctx, qvec, req.Question, resp)
 	}
 	return resp, nil
+}
+
+// keepEntailed splits claims by the verifier's verdicts, returning the ones to
+// emit and the indexes of the ones dropped. Order is preserved, since the claims
+// are the answer's prose and read in sequence.
+//
+// A verdict list shorter than the claim list would silently emit unverified
+// claims, so anything unaccounted for is treated as not entailed. verifyClaims
+// already rejects a length mismatch; this is the belt to that braces.
+func keepEntailed(claims []Claim, entailed []bool) ([]Claim, []int) {
+	kept := claims[:0:0]
+	var dropped []int
+	for i, c := range claims {
+		if i < len(entailed) && entailed[i] {
+			kept = append(kept, c)
+			continue
+		}
+		dropped = append(dropped, i)
+	}
+	return kept, dropped
 }
 
 // loosenChunkID collapses everything models get wrong when retyping an id —

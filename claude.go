@@ -146,7 +146,11 @@ Rules:
   the answer is in there and find it. Return an empty claims list only if the
   sources truly say nothing about the question.
 - Write the claims as the answer itself, in order: read end to end they should
-  read as continuous prose, not as disconnected bullet points.`
+  read as continuous prose, not as disconnected bullet points.
+- Each claim must still be a complete, self-contained sentence that names its
+  own subject. Never split one sentence across several claims, and never open a
+  claim with a word that refers back to a previous one. Each claim is checked
+  against its sources on its own, so a fragment cannot be checked at all.`
 
 // Claim is one sentence of the answer plus the sources that entail it.
 type Claim struct {

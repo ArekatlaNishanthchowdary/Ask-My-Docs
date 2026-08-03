@@ -291,3 +291,34 @@ func TestResolveCitation(t *testing.T) {
 		t.Errorf("ambiguous citation resolved to %q, want dropped", got)
 	}
 }
+
+func TestKeepEntailedDropsOnlyUnsupportedClaims(t *testing.T) {
+	claims := []Claim{{Text: "a"}, {Text: "b"}, {Text: "c"}}
+
+	kept, dropped := keepEntailed(claims, []bool{true, false, true})
+	if len(kept) != 2 || kept[0].Text != "a" || kept[1].Text != "c" {
+		t.Errorf("kept = %v, want the entailed claims in order", kept)
+	}
+	if len(dropped) != 1 || dropped[0] != 1 {
+		t.Errorf("dropped = %v, want [1]", dropped)
+	}
+
+	// Nothing entailed leaves no answer, which the caller turns into a refusal.
+	if kept, _ := keepEntailed(claims, []bool{false, false, false}); len(kept) != 0 {
+		t.Errorf("kept %d claims with no verdicts true, want 0", len(kept))
+	}
+
+	// A short verdict list must not let unverified claims through.
+	kept, dropped = keepEntailed(claims, []bool{true})
+	if len(kept) != 1 || kept[0].Text != "a" {
+		t.Errorf("kept = %v, want only the claim an actual verdict covered", kept)
+	}
+	if len(dropped) != 2 {
+		t.Errorf("dropped = %v, want the two uncovered claims", dropped)
+	}
+
+	// The input must not be aliased: kept shares no array with claims.
+	if kept, _ := keepEntailed(claims, []bool{false, true, true}); len(kept) > 0 && claims[0].Text != "a" {
+		t.Errorf("keepEntailed overwrote its input: claims[0] = %q", claims[0].Text)
+	}
+}
