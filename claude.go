@@ -71,6 +71,12 @@ document, what it is about, and any entity, date, or subject that the chunk
 refers to only by pronoun or shorthand. Do not summarise the chunk's content
 and do not add information that is not in the document.
 
+Name those entities. Write the context so it stands alone without the
+document beside it: never fall back on "the individual", "the company", "this
+report" or any other phrase that points at something instead of naming it.
+The context is what makes a chunk findable once it is on its own, and a
+reference nobody can resolve carries no term to search for.
+
 Return exactly %d contexts, in the same order as the chunks.
 
 %s`
