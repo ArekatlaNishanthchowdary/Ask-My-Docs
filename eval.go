@@ -463,3 +463,42 @@ func toMap(m Metrics) map[string]float64 {
 	_ = json.Unmarshal(b, &raw)
 	return raw
 }
+
+// CheckGoldenIDs fails fast when a golden item references a chunk that is not
+// in the index.
+//
+// A mistyped chunk id does not error anywhere — it simply never matches, so the
+// item scores 0 recall for the rest of the file's life and every number built
+// on it is quietly wrong. Chunk ids also change whenever chunking changes, so
+// this is not a one-off typo check: it is what catches a golden set that has
+// silently gone stale against its own corpus.
+func (a *App) CheckGoldenIDs(ctx context.Context, items []GoldenItem) error {
+	seen := map[string]bool{}
+	var missing []string
+	for _, it := range items {
+		for _, id := range it.Relevant {
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			n, err := a.Qdrant.CountFiltered(ctx, a.Cfg.Collection,
+				map[string]any{"must": []map[string]any{
+					{"key": "chunk_id", "match": map[string]any{"value": id}},
+				}})
+			if err != nil {
+				return fmt.Errorf("checking golden chunk ids: %w", err)
+			}
+			if n == 0 {
+				missing = append(missing, fmt.Sprintf("%s (item %s)", id, it.ID))
+			}
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return fmt.Errorf("%d golden chunk id(s) are not in collection %q:\n  %s\n"+
+			"Re-run `ask-my-docs chunks -dir corpus` and update the golden set — "+
+			"these items would score 0 recall forever without ever erroring",
+			len(missing), a.Cfg.Collection, strings.Join(missing, "\n  "))
+	}
+	return nil
+}

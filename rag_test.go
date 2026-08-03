@@ -375,3 +375,33 @@ func TestDocDigestBoundsTheBodyButKeepsTheShape(t *testing.T) {
 		t.Error("digest carried body text from beyond the head")
 	}
 }
+
+func TestParseAblateRejectsUnknownStages(t *testing.T) {
+	got, err := parseAblate("rerank, GATE ,verify")
+	if err != nil {
+		t.Fatalf("parseAblate: %v", err)
+	}
+	for _, s := range []string{"rerank", "gate", "verify"} {
+		if !got[s] {
+			t.Errorf("stage %q not disabled", s)
+		}
+	}
+	if got["sparse"] {
+		t.Error("parseAblate disabled a stage that was not named")
+	}
+
+	// A typo must not produce a benchmark row that silently measures the full
+	// pipeline and reports it as an ablation.
+	if _, err := parseAblate("rerankr"); err == nil {
+		t.Error("parseAblate accepted an unknown stage")
+	}
+
+	// No context at all necessarily means no LLM context either.
+	if got, _ := parseAblate("context"); !got["llmcontext"] {
+		t.Error(`ABLATE=context must imply llmcontext`)
+	}
+
+	if got, err := parseAblate(""); err != nil || len(got) != 0 {
+		t.Errorf("empty ABLATE = %v, %v; want no stages disabled", got, err)
+	}
+}

@@ -305,6 +305,7 @@ answers as an upper bound, not a measurement.
 | `ingest -dir DIR [-acl a,b] [-force]` | Chunk, contextualize, embed and index. Idempotent, and skips documents unchanged since the last run unless `-force`. |
 | `query [-acl a,b] [-json] Q` | One question, printed with sources and per-stage timings. |
 | `eval [-verbose] [-update-baseline]` | Run the golden set, print metrics, fail on regression. |
+| `ablate [-judge=false] [-from N]` | Run the golden set once per pipeline stage and print what each stage is worth. |
 | `calibrate` | Derive `MIN_RERANK_SCORE` from the golden set instead of guessing. |
 | `chunks -dir DIR [-text]` | Print chunk boundaries and ids. Offline — no keys, no services. |
 | `detect` | Detect the GPU, pick the reranker image, write it to `.env`. Offline. |
@@ -506,6 +507,41 @@ change with it — regenerate with `chunks -dir` and re-baseline.
 
 Baselines are config-specific and **not comparable across backends**. There is
 none in this checkout; generate yours with `eval -update-baseline`.
+
+### Proving it beats plain RAG
+
+"Better than traditional RAG" is not a claim until "traditional RAG" is
+something you can run. Here it means the textbook baseline: embed, take the top
+k by cosine, put them in the prompt, generate — no sparse retrieval, no
+reranking, no confidence gate, no citation enforcement, no entailment check.
+
+`ABLATE` switches those stages off individually, so that baseline is a
+configuration rather than a second codebase, and `ablate` walks the ladder from
+it to the full pipeline one stage at a time:
+
+```bash
+./ask-my-docs ablate                    # 6 rungs x the golden set
+./ask-my-docs ablate -judge=false       # skip the judge; retrieval metrics only
+```
+
+Each row differs from the row below it by exactly one stage, so the delta is
+that stage's contribution on **your** corpus. Unknown stage names are rejected
+at startup — a typo that silently measures the full pipeline and reports it as
+an ablation is worse than a crash, because it produces a table that looks real.
+
+Two honest limits:
+
+- **Deltas smaller than `1/N` are noise.** With 37 items scoring 0, 0.5 or 1.0,
+  one item flipping moves a mean by 0.027. `ablate` prints its own noise floor
+  and renders anything under it as `~0`.
+- **Contextualization is not in the table.** It is baked into the vectors at
+  ingest time, so its three rungs — no context, derived context, LLM context —
+  need one collection each and one ingest each. `ablate` prints the commands
+  rather than spending the tokens for you.
+
+A corpus of a few hundred chunks cannot settle the question either way: at that
+size `recall_at_10` is arithmetic, not quality. The claim only becomes
+defensible on a real benchmark with enough items that `1/N` is small.
 
 ### Reference measurements
 

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -73,6 +74,10 @@ type Config struct {
 	ChunkOverlap      int
 	IngestConcurrency int
 	ContextDocChars   int
+
+	// Ablate switches individual pipeline stages off so `eval` can measure what
+	// each one is worth instead of asserting it. See ablatable.
+	Ablate map[string]bool
 
 	CorpusDir         string
 	MaxUploadMB       int
@@ -548,6 +553,17 @@ func main() {
 	}
 	loadDotEnv(env("ENV_FILE", ".env"))
 	cfg := LoadConfig()
+	ablate, err := parseAblate(os.Getenv("ABLATE"))
+	if err != nil {
+		log.Fatalf("error: %v", err)
+	}
+	cfg.Ablate = ablate
+	if len(ablate) > 0 {
+		// Loud, because every downstream number is now measuring a crippled
+		// pipeline. An ablation run that gets mistaken for a normal one is how a
+		// benchmark table ends up quietly wrong.
+		fmt.Fprintf(os.Stderr, "ABLATION ACTIVE — stages disabled: %s\n", os.Getenv("ABLATE"))
+	}
 	ctx := context.Background()
 
 	switch os.Args[1] {
@@ -561,6 +577,8 @@ func main() {
 		run(ctx, cfg, cmdQuery)
 	case "eval":
 		run(ctx, cfg, cmdEval)
+	case "ablate":
+		run(ctx, cfg, cmdAblate)
 	case "calibrate":
 		run(ctx, cfg, cmdCalibrate)
 	case "detect":
@@ -641,6 +659,7 @@ func usage() {
   ingest   Index a directory of documents
   query    Ask one question from the command line
   eval     Run the golden eval set and gate on regressions
+  ablate   Run the golden set once per pipeline stage and print what each is worth
   calibrate Derive MIN_RERANK_SCORE from the golden set
   chunks   Print chunk boundaries and ids for a directory (offline, no keys)
   detect   Pick the reranker image for this machine's GPU and write it to .env
@@ -1223,6 +1242,9 @@ func cmdEval(ctx context.Context, a *App, args []string) error {
 			"anything (the file documents the format; `chunks -dir corpus` prints the "+
 			"chunk ids to reference)", *golden)
 	}
+	if err := a.CheckGoldenIDs(ctx, items); err != nil {
+		return err
+	}
 	fmt.Printf("running %d eval items...\n", len(items))
 
 	m, results, err := a.RunEval(ctx, items, *judge)
@@ -1299,6 +1321,31 @@ func envFloat(k string, def float64) float64 {
 		return v
 	}
 	return def
+}
+
+// ablatable lists every stage ABLATE can switch off, in pipeline order.
+//
+// A closed set, because the whole point of an ablation is that the config
+// matches the claim. ABLATE=rerankr measuring nothing and reporting a number
+// anyway is worse than a crash: it produces a benchmark row that looks real.
+var ablatable = []string{"sparse", "rerank", "gate", "llmcontext", "context", "citations", "verify"}
+
+// parseAblate reads the ABLATE set and rejects anything it does not recognise.
+func parseAblate(raw string) (map[string]bool, error) {
+	out := map[string]bool{}
+	for _, s := range splitCSV(raw) {
+		s = strings.ToLower(s)
+		if !slices.Contains(ablatable, s) {
+			return nil, fmt.Errorf("ABLATE: unknown stage %q (known: %s)", s, strings.Join(ablatable, ", "))
+		}
+		out[s] = true
+	}
+	// "context" means no context at all, which necessarily removes the LLM one
+	// too. Implying it here keeps the ladder's rungs from having to know that.
+	if out["context"] {
+		out["llmcontext"] = true
+	}
+	return out, nil
 }
 
 func splitCSV(s string) []string {

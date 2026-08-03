@@ -139,19 +139,27 @@ func (a *App) IngestDoc(ctx context.Context, docID, version string, acl []string
 		return 0, nil
 	}
 
-	contexts, err := a.llm().Contextualize(ctx, docDigest(text, a.Cfg.ContextDocChars), chunks)
-	if err != nil {
-		// Retrieval quality degrades without the situating preamble, but the
-		// document is still findable. Do not fail the whole ingest over it.
-		fmt.Fprintf(os.Stderr, "warn: %s: contextualize failed, indexing raw chunks: %v\n", docID, err)
-		contexts = make([]string, len(chunks))
+	// The three context rungs of the ablation ladder — none, derived, written —
+	// differ only in what fills this slice. They have to be chosen at ingest
+	// time because the context is baked into the vector, so each rung needs its
+	// own QDRANT_COLLECTION rather than a flag on the query.
+	contexts := make([]string, len(chunks))
+	if !a.off("llmcontext") {
+		written, err := a.llm().Contextualize(ctx, docDigest(text, a.Cfg.ContextDocChars), chunks)
+		if err != nil {
+			// Retrieval quality degrades without the situating preamble, but the
+			// document is still findable. Do not fail the whole ingest over it.
+			fmt.Fprintf(os.Stderr, "warn: %s: contextualize failed, indexing raw chunks: %v\n", docID, err)
+		} else {
+			contexts = written
+		}
 	}
 
 	// The embedded text carries the context; the payload keeps the raw chunk,
 	// because that is what gets shown to the user and fed to the reranker.
 	embedTexts := make([]string, len(chunks))
 	for i, c := range chunks {
-		if strings.TrimSpace(contexts[i]) == "" {
+		if strings.TrimSpace(contexts[i]) == "" && !a.off("context") {
 			contexts[i] = fallbackContext(docID, c.Section)
 		}
 		embedTexts[i] = strings.TrimSpace(contexts[i] + "\n\n" + c.Text)

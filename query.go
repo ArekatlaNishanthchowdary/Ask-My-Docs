@@ -155,31 +155,45 @@ func (a *App) Query(ctx context.Context, req QueryRequest) (QueryResponse, error
 		k := loosenChunkID(s.ChunkID)
 		loose[k] = append(loose[k], s.ChunkID)
 	}
-	for i := range ans.Claims {
-		kept := ans.Claims[i].Citations[:0]
-		for _, cid := range ans.Claims[i].Citations {
-			if resolved, ok := resolveCitation(cid, valid, loose); ok {
-				kept = append(kept, resolved)
-			} else {
-				resp.Warnings = append(resp.Warnings,
-					fmt.Sprintf("dropped citation to unretrieved chunk %q", cid))
+	// ABLATE=citations takes the model's citations at face value, which is what
+	// a pipeline without this stage does — including citing chunks it was never
+	// shown.
+	if !a.off("citations") {
+		for i := range ans.Claims {
+			kept := ans.Claims[i].Citations[:0]
+			for _, cid := range ans.Claims[i].Citations {
+				if resolved, ok := resolveCitation(cid, valid, loose); ok {
+					kept = append(kept, resolved)
+				} else {
+					resp.Warnings = append(resp.Warnings,
+						fmt.Sprintf("dropped citation to unretrieved chunk %q", cid))
+				}
 			}
-		}
-		ans.Claims[i].Citations = kept
-		if len(kept) == 0 {
-			resp.Answer = insufficientAnswer
-			resp.Warnings = append(resp.Warnings, "claim had no valid citation")
-			resp.Timings.Total = ms(start)
-			return resp, nil
+			ans.Claims[i].Citations = kept
+			if len(kept) == 0 {
+				resp.Answer = insufficientAnswer
+				resp.Warnings = append(resp.Warnings, "claim had no valid citation")
+				resp.Timings.Total = ms(start)
+				return resp, nil
+			}
 		}
 	}
 
-	t = time.Now()
-	entailed, err := a.verifyClaims(ctx, ans.Claims, valid)
-	if err != nil {
-		return resp, fmt.Errorf("verify: %w", err)
+	entailed := make([]bool, len(ans.Claims))
+	if a.off("verify") {
+		// Nothing is checked, so nothing is dropped: keepEntailed below must see
+		// every claim as passing rather than as unverified.
+		for i := range entailed {
+			entailed[i] = true
+		}
+	} else {
+		t = time.Now()
+		entailed, err = a.verifyClaims(ctx, ans.Claims, valid)
+		if err != nil {
+			return resp, fmt.Errorf("verify: %w", err)
+		}
+		resp.Timings.Verify = ms(t)
 	}
-	resp.Timings.Verify = ms(t)
 
 	// An unentailed claim means the model cited something that does not actually
 	// support it — exactly the hallucination this stage exists to catch — so it
@@ -328,6 +342,11 @@ func (a *App) verifyClaims(ctx context.Context, claims []Claim, valid map[string
 // produces no such separation — everything clusters at the noise floor.
 // MIN_RERANK_SCORE remains an absolute floor beneath which nothing passes.
 func (a *App) gateThreshold(candidates []Source) float32 {
+	if a.off("gate") {
+		// No bar at all: every candidate passes and TopK alone decides what the
+		// generator sees. This is the baseline's "stuff the top k in the prompt".
+		return 0
+	}
 	floor := a.Cfg.MinRerankScore
 	if a.Cfg.RerankMargin <= 0 || len(candidates) < 4 {
 		return floor // relative gating disabled, or too few samples to be meaningful
@@ -345,6 +364,11 @@ func (a *App) gateThreshold(candidates []Source) float32 {
 	return floor
 }
 
+// off reports whether a pipeline stage has been ablated. It exists so the
+// ablation reads the same everywhere and so the stage names live in exactly one
+// list (ablatable), which parseAblate validates against at startup.
+func (a *App) off(stage string) bool { return a.Cfg.Ablate[stage] }
+
 // Stage holds both the fused candidate set and the reranked top-k. The eval
 // harness needs both to report the reranker's nDCG lift over retrieval alone.
 type Stage struct {
@@ -360,8 +384,16 @@ func (a *App) RetrieveAndRank(ctx context.Context, question string, qvec []float
 	var st Stage
 
 	t := time.Now()
-	hits, err := a.Qdrant.HybridSearch(ctx, a.Cfg.Collection, qvec,
-		SparseEncode(question), a.Cfg.CandidateK, aclFilter(acl))
+	var hits []Hit
+	var err error
+	if a.off("sparse") {
+		// Dense-only ANN: the textbook baseline, and the thing hybrid retrieval
+		// has to beat to justify the sparse index.
+		hits, err = a.Qdrant.DenseSearch(ctx, a.Cfg.Collection, qvec, a.Cfg.CandidateK, aclFilter(acl))
+	} else {
+		hits, err = a.Qdrant.HybridSearch(ctx, a.Cfg.Collection, qvec,
+			SparseEncode(question), a.Cfg.CandidateK, aclFilter(acl))
+	}
 	if err != nil {
 		return st, fmt.Errorf("retrieve: %w", err)
 	}
@@ -383,6 +415,15 @@ func (a *App) RetrieveAndRank(ctx context.Context, question string, qvec []float
 		// The reranker sees the situating context too — the same text the
 		// embedding was built from, so both stages judge the same object.
 		docs[i] = strings.TrimSpace(str(h.Payload["context"]) + "\n\n" + st.Candidates[i].Text)
+	}
+
+	if a.off("rerank") {
+		// Retrieval order, retrieval scores. The relative gate still works on
+		// them: RRF scores are on a different scale to a sigmoid, but the gate
+		// compares against their own median, which is exactly why it was built
+		// relative. The absolute floor is the part that does not transfer.
+		st.Ranked = st.Candidates
+		return st, nil
 	}
 
 	t = time.Now()
@@ -438,7 +479,7 @@ func aclFilter(acl []string) map[string]any {
 // --- Semantic cache -------------------------------------------------------
 
 func (a *App) cacheGet(ctx context.Context, qvec []float32) (QueryResponse, bool) {
-	hits, err := a.Qdrant.DenseSearch(ctx, a.Cfg.CacheCollection, qvec, 1)
+	hits, err := a.Qdrant.DenseSearch(ctx, a.Cfg.CacheCollection, qvec, 1, nil)
 	if err != nil || len(hits) == 0 || hits[0].Score < a.Cfg.CacheThreshold {
 		return QueryResponse{}, false
 	}

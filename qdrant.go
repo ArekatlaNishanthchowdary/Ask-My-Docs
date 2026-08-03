@@ -154,10 +154,14 @@ func (q *Qdrant) HybridSearch(ctx context.Context, name string, dense []float32,
 	return out.Result.Points, nil
 }
 
-// DenseSearch is the semantic cache lookup: nearest neighbour on the query
-// embedding alone, no fusion, no rerank.
-func (q *Qdrant) DenseSearch(ctx context.Context, name string, dense []float32, limit int) ([]Hit, error) {
+// DenseSearch is nearest neighbour on the query embedding alone — no fusion, no
+// rerank. It serves the semantic cache lookup, and ABLATE=sparse uses it to
+// retrieve the dense-only baseline hybrid search has to beat.
+func (q *Qdrant) DenseSearch(ctx context.Context, name string, dense []float32, limit int, filter map[string]any) ([]Hit, error) {
 	body := map[string]any{"query": dense, "using": "dense", "limit": limit, "with_payload": true}
+	if filter != nil {
+		body["filter"] = filter
+	}
 	var out queryResp
 	if err := q.do(ctx, http.MethodPost, "/collections/"+name+"/points/query", body, &out); err != nil {
 		return nil, err

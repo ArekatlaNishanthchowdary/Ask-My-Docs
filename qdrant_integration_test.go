@@ -140,7 +140,7 @@ func TestIntegrationQdrantRoundTrip(t *testing.T) {
 	})
 
 	t.Run("dense search backs the semantic cache", func(t *testing.T) {
-		hits, err := q.DenseSearch(ctx, coll, target, 1)
+		hits, err := q.DenseSearch(ctx, coll, target, 1, nil)
 		if err != nil {
 			t.Fatalf("DenseSearch: %v", err)
 		}

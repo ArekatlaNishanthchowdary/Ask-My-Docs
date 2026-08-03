@@ -1,9 +1,5 @@
 // Golden eval set — one JSON object per line. Blank lines and // comments are ignored.
 //
-// This file is empty. `eval` and `calibrate` do nothing useful until you add
-// items, and the CI quality gate has nothing to gate on. Build it early: it is
-// what turns "the answer looked fine" into a number that can regress.
-//
 // FIELDS
 //   id                  short stable name, shown in `eval -verbose` output
 //   query               the question, phrased the way a real user would
@@ -27,11 +23,66 @@
 //     "relevant_chunk_ids": [] — exercises the confidence gate. Without at
 //     least one of these, `calibrate` cannot bound the gate from below.
 //
-// Aim for enough items that one flipping does not move the mean much: at 13
-// items scored in 0/0.5/1.0 steps, a single item is worth 0.038.
+// Aim for enough items that one flipping does not move the mean much. The 32
+// items below put one item at 0.031, which is the floor `ablate` reports
+// against — a difference smaller than that is not a finding.
 //
-// EXAMPLES (delete these — the ids are made up and will not match your corpus):
-//
-// {"id": "refund-window", "query": "How long do I have to request a refund?", "relevant_chunk_ids": ["billing.md#2"], "gold_answer": "Within 90 days of the invoice date.", "stage": "generation"}
-// {"id": "err-4290", "query": "ERR-4290", "relevant_chunk_ids": ["api-errors.md#1"], "stage": "retrieval"}
-// {"id": "out-of-corpus", "query": "What is the parental leave policy?", "relevant_chunk_ids": [], "gold_answer": "I don't have enough information in the indexed documents to answer that.", "stage": "generation"}
+// The items are grounded in the sample corpus/ shipped with this repo. On your
+// own corpus they will all fail: replace them, do not adapt them.
+
+// --- RestaurantIQ proposal ------------------------------------------------
+// Short, densely sectioned prose. Exercises the dense leg — several of these
+// share almost no vocabulary with the chunk that answers them.
+{"id": "riq-stack-db", "query": "What database and cache does RestaurantIQ use?", "relevant_chunk_ids": ["RestaurantIQ_AI_Customer_Experience_Platform_Proposal.md#9"], "gold_answer": "PostgreSQL as the database and Redis as the cache.", "stage": "generation"}
+{"id": "riq-stack-web", "query": "What frontend and backend frameworks does RestaurantIQ use?", "relevant_chunk_ids": ["RestaurantIQ_AI_Customer_Experience_Platform_Proposal.md#9"], "gold_answer": "Next.js/React on the frontend and FastAPI on the backend.", "stage": "generation"}
+{"id": "riq-mvp-excluded", "query": "What is deliberately left out of the first release?", "relevant_chunk_ids": ["RestaurantIQ_AI_Customer_Experience_Platform_Proposal.md#5"], "gold_answer": "Custom NFC ordering, an employee portal, loyalty programs, marketing automation, POS integrations, an AI chatbot, advanced forecasting and enterprise workflows.", "stage": "generation"}
+{"id": "riq-feedback-capture", "query": "How does RestaurantIQ collect customer feedback?", "relevant_chunk_ids": ["RestaurantIQ_AI_Customer_Experience_Platform_Proposal.md#1", "RestaurantIQ_AI_Customer_Experience_Platform_Proposal.md#4"], "gold_answer": "Through a QR/NFC review page, with multilingual voice-to-text.", "stage": "generation"}
+{"id": "riq-revenue", "query": "How does RestaurantIQ make money?", "relevant_chunk_ids": ["RestaurantIQ_AI_Customer_Experience_Platform_Proposal.md#11"], "gold_answer": "A monthly SaaS subscription, with optional hardware sales for NFC stands. Recurring software revenue is the primary model.", "stage": "generation"}
+{"id": "riq-differentiator", "query": "What makes RestaurantIQ different from an ordinary review collection tool?", "relevant_chunk_ids": ["RestaurantIQ_AI_Customer_Experience_Platform_Proposal.md#7"], "gold_answer": "It acts as an AI operations consultant that identifies why customer satisfaction changes and recommends improvements, rather than merely collecting reviews.", "stage": "generation"}
+{"id": "riq-ai-cost", "query": "How does RestaurantIQ keep its AI spend under control?", "relevant_chunk_ids": ["RestaurantIQ_AI_Customer_Experience_Platform_Proposal.md#14"], "gold_answer": "By using lightweight models for routine analysis and premium models only for summaries.", "stage": "generation"}
+{"id": "riq-roadmap", "query": "What are the phases of the RestaurantIQ roadmap?", "relevant_chunk_ids": ["RestaurantIQ_AI_Customer_Experience_Platform_Proposal.md#12"], "gold_answer": "Phase 1 MVP, Phase 2 multi-branch support, Phase 3 POS integrations, Phase 4 AI assistant, Phase 5 predictive analytics and expansion into other industries.", "stage": "generation"}
+{"id": "riq-expansion", "query": "Which industries beyond restaurants could the platform serve?", "relevant_chunk_ids": ["RestaurantIQ_AI_Customer_Experience_Platform_Proposal.md#1"], "gold_answer": "Hotels, cafes, salons, clinics and retail.", "stage": "generation"}
+{"id": "riq-architecture", "query": "RestaurantIQ API Gateway request flow", "relevant_chunk_ids": ["RestaurantIQ_AI_Customer_Experience_Platform_Proposal.md#10"], "stage": "retrieval"}
+{"id": "riq-modules", "query": "What are the system modules?", "relevant_chunk_ids": ["RestaurantIQ_AI_Customer_Experience_Platform_Proposal.md#8"], "stage": "retrieval"}
+
+// --- Hardware inventory ---------------------------------------------------
+// A comma-separated table with no prose at all. Exercises the sparse/lexical
+// leg: the answers are part numbers and quantities, which is exactly what pure
+// vector search misses.
+{"id": "lab-rpi-count", "query": "How many Raspberry Pi 4 Model B boards are in the lab?", "relevant_chunk_ids": ["HARDWARE-COMPONENTS-OF-THE-LAB-comma-separated.txt#0"], "gold_answer": "Five.", "stage": "generation"}
+{"id": "lab-soldering", "query": "What soldering equipment does the lab have?", "relevant_chunk_ids": ["HARDWARE-COMPONENTS-OF-THE-LAB-comma-separated.txt#2"], "gold_answer": "A 25W soldering iron, 50g of lead/tin wire and 15g of yellow soldering flux.", "stage": "generation"}
+{"id": "lab-drone-frame", "query": "How many F450 quadcopter frames does the lab have?", "relevant_chunk_ids": ["HARDWARE-COMPONENTS-OF-THE-LAB-comma-separated.txt#2"], "gold_answer": "Four, each with PCB.", "stage": "generation"}
+{"id": "lab-gps", "query": "UBLOX NEO 6M", "relevant_chunk_ids": ["HARDWARE-COMPONENTS-OF-THE-LAB-comma-separated.txt#0", "HARDWARE-COMPONENTS-OF-THE-LAB-comma-separated.txt#1"], "stage": "retrieval"}
+{"id": "lab-9v-batteries", "query": "How many 9V batteries are in the lab inventory?", "relevant_chunk_ids": ["HARDWARE-COMPONENTS-OF-THE-LAB-comma-separated.txt#1"], "gold_answer": "Ten.", "stage": "generation"}
+{"id": "lab-multimeter", "query": "Which multimeter is available in the lab?", "relevant_chunk_ids": ["HARDWARE-COMPONENTS-OF-THE-LAB-comma-separated.txt#2"], "gold_answer": "A digital multimeter, model M890.", "stage": "generation"}
+{"id": "lab-bldc-motor", "query": "What brushless motors are used for the drones?", "relevant_chunk_ids": ["HARDWARE-COMPONENTS-OF-THE-LAB-comma-separated.txt#2"], "gold_answer": "A2212 1000kv brushless motors, four of them.", "stage": "generation"}
+{"id": "lab-a4988", "query": "PCB A4988 MODULE", "relevant_chunk_ids": ["HARDWARE-COMPONENTS-OF-THE-LAB-comma-separated.txt#0"], "stage": "retrieval"}
+
+// --- Resume ---------------------------------------------------------------
+// Two near-duplicate documents about one person. Exercises reranking: both are
+// on-topic for almost any query here, but only one chunk answers each.
+{"id": "cv-who", "query": "Who is Nishanth Chowdary?", "relevant_chunk_ids": ["Arekatla Nishanth Chowdary_Doc.docx#0", "Arekatla_Nishanth_Chowdary_Resume_Viasat.docx#0"], "gold_answer": "Arekatla Nishanth Chowdary is a Computer Science Engineering student at Amrita Vishwa Vidyapeetham, reading for a B.Tech in Computer Science Engineering (with AI) since 2023, with programming experience in Java, C++, C, JavaScript and Python and hands-on work across AI/ML, computer vision and full-stack projects.", "stage": "generation"}
+{"id": "cv-cgpa", "query": "What is Nishanth's CGPA?", "relevant_chunk_ids": ["Arekatla Nishanth Chowdary_Doc.docx#0"], "gold_answer": "7.23.", "stage": "generation"}
+{"id": "cv-internship", "query": "Where did Nishanth intern, and when?", "relevant_chunk_ids": ["Arekatla Nishanth Chowdary_Doc.docx#1"], "gold_answer": "As an AI Developer Intern at Viswam.AI, IIIT Hyderabad, from April 2025 to July 2025, on-site.", "stage": "generation"}
+{"id": "cv-traffic-project", "query": "What did the Smart Traffic Management System achieve?", "relevant_chunk_ids": ["Arekatla Nishanth Chowdary_Doc.docx#1"], "gold_answer": "It cut emergency vehicle response time by 35%, using a real-time vehicle detection and tracking pipeline built with YOLOv8 and OpenCV.", "stage": "generation"}
+{"id": "cv-warp-stack", "query": "What technologies does the WARP waste analysis project use?", "relevant_chunk_ids": ["Arekatla Nishanth Chowdary_Doc.docx#2"], "gold_answer": "The Gemini API, Firebase and Flask.", "stage": "generation"}
+{"id": "cv-certification", "query": "What cloud certification does Nishanth hold?", "relevant_chunk_ids": ["Arekatla Nishanth Chowdary_Doc.docx#2"], "gold_answer": "Oracle Cloud Infrastructure 2025 Certified Generative AI Professional, earned in May 2025.", "stage": "generation"}
+{"id": "cv-databases", "query": "Which databases does Nishanth know?", "relevant_chunk_ids": ["Arekatla Nishanth Chowdary_Doc.docx#0"], "gold_answer": "MySQL, MongoDB and SQLite.", "stage": "generation"}
+
+// --- Financial QA table ---------------------------------------------------
+// Long rows, numbers, and several near-identical chunks per question. Exercises
+// reranking hardest: many chunks mention Apple's net sales and only one carries
+// the figure asked for.
+{"id": "aapl-netsales-q3-23", "query": "What were Apple's total net sales for the quarter ended July 1, 2023?", "relevant_chunk_ids": ["qna_data.csv#0"], "gold_answer": "$81,797 million.", "stage": "generation"}
+{"id": "aapl-iphone-dec-22", "query": "How much revenue did Apple's iPhone sales generate in the quarter ended December 31, 2022?", "relevant_chunk_ids": ["qna_data.csv#3"], "gold_answer": "$65,775 million.", "stage": "generation"}
+{"id": "aapl-rd-driver", "query": "What is driving the growth in Apple's R&D expense?", "relevant_chunk_ids": ["qna_data.csv#2"], "gold_answer": "Increases in headcount-related expenses.", "stage": "generation"}
+{"id": "aapl-services-apr-23", "query": "What were Apple's Services net sales in the quarter ended April 1, 2023?", "relevant_chunk_ids": ["qna_data.csv#4"], "gold_answer": "$20,907 million.", "stage": "generation"}
+
+// --- Out of corpus --------------------------------------------------------
+// Without these the confidence gate cannot be bounded from below, and `ablate`
+// cannot show what removing it costs — a pipeline that answers everything
+// scores identically to one that answers correctly, until something asks it a
+// question the corpus does not cover.
+{"id": "neg-capital-city", "query": "What is the capital of Mongolia?", "relevant_chunk_ids": [], "gold_answer": "I don't have enough information in the indexed documents to answer that.", "stage": "generation"}
+{"id": "neg-passport", "query": "How do I renew an Indian passport?", "relevant_chunk_ids": [], "gold_answer": "I don't have enough information in the indexed documents to answer that.", "stage": "generation"}
+{"id": "neg-parental-leave", "query": "What is the company's parental leave policy?", "relevant_chunk_ids": [], "gold_answer": "I don't have enough information in the indexed documents to answer that.", "stage": "generation"}
