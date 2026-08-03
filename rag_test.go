@@ -61,6 +61,30 @@ func TestChunkDocSplitsOversizedSectionsWithOverlap(t *testing.T) {
 	}
 }
 
+func TestChunkDocHardSplitDoesNotCutMidWord(t *testing.T) {
+	// A CSV or other table rendered to markdown is one giant blob of
+	// "\n"-joined rows with no blank line anywhere, so packText's paragraph
+	// splitter never fires and the whole thing falls into the hard-split
+	// path. Each row here stands in for a table row.
+	var rows []string
+	for i := range 40 {
+		rows = append(rows, "| this is table row number "+strings.Repeat("x", i%7)+" with some content |")
+	}
+	doc := "# Data\n\n" + strings.Join(rows, "\n")
+
+	chunks := ChunkDoc(doc, 300, 50)
+	if len(chunks) < 2 {
+		t.Fatalf("expected the blob to hard-split, got %d chunk(s)", len(chunks))
+	}
+	// Every row ends in "|"; a chunk that got cut mid-row ends somewhere else.
+	for i, c := range chunks {
+		end := strings.TrimRight(c.Text, "\n")
+		if !strings.HasSuffix(end, "|") {
+			t.Errorf("chunk %d cut mid-row instead of on a row boundary: %q", i, end[max(0, len(end)-30):])
+		}
+	}
+}
+
 func TestSparseEncodeIsDeterministicAndCountsTerms(t *testing.T) {
 	a := SparseEncode("Error CODE-500 error")
 	b := SparseEncode("error code-500 ERROR")

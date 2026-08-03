@@ -91,15 +91,26 @@ func packText(body string, maxChars, overlap int) []string {
 		if para == "" {
 			continue
 		}
-		// A single paragraph larger than the budget is hard-split; nothing smarter
-		// is available without a tokenizer, and it is rare in practice.
+		// A single paragraph larger than the budget is hard-split. A CSV or
+		// other table converted to one giant blob has no blank lines to pack
+		// on, so this is not rare: it is the only path a 168-row CSV takes.
+		// Cutting at a byte offset severs a word (or a table row) mid-cell,
+		// which is exactly the garbled input that made a generator refuse to
+		// answer from a chunk that actually held the answer. Prefer the last
+		// line break, then the last space, within the budget.
 		for len(para) > maxChars {
 			if cur.Len() > 0 {
 				out = append(out, cur.String())
 				cur.Reset()
 			}
-			out = append(out, para[:maxChars])
-			para = para[maxChars-overlap:]
+			cut := maxChars
+			if i := strings.LastIndexByte(para[:maxChars], '\n'); i > maxChars/2 {
+				cut = i + 1
+			} else if i := strings.LastIndexByte(para[:maxChars], ' '); i > maxChars/2 {
+				cut = i + 1
+			}
+			out = append(out, para[:cut])
+			para = para[max(cut-overlap, 0):]
 		}
 		if cur.Len()+len(para)+2 > maxChars && cur.Len() > 0 {
 			s := cur.String()
