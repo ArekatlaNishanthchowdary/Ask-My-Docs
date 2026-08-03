@@ -139,7 +139,7 @@ func (a *App) IngestDoc(ctx context.Context, docID, version string, acl []string
 		return 0, nil
 	}
 
-	contexts, err := a.llm().Contextualize(ctx, text, chunks)
+	contexts, err := a.llm().Contextualize(ctx, docDigest(text, a.Cfg.ContextDocChars), chunks)
 	if err != nil {
 		// Retrieval quality degrades without the situating preamble, but the
 		// document is still findable. Do not fail the whole ingest over it.
@@ -188,6 +188,66 @@ func (a *App) IngestDoc(ctx context.Context, docID, version string, acl []string
 		}
 	}
 	return len(pts), a.Qdrant.Upsert(ctx, a.Cfg.Collection, pts)
+}
+
+// docDigest bounds what contextualization is allowed to call "the document".
+//
+// Every provider puts the document body in the system prompt of every batch, so
+// a C-chunk document costs ceil(C/batch) x |document| prompt tokens — quadratic
+// in its length. The 197-chunk CSV in this corpus costs ~1.9M tokens to
+// contextualize; a thousand-chunk manual would cost ~50M for one document. That
+// is the shape that makes a large corpus unaffordable rather than merely
+// expensive, and no amount of concurrency tuning touches it.
+//
+// The full body was never what the model needed. It needs to know what the
+// document is, which the opening lines and the heading outline carry; the text
+// immediately around a chunk already arrives in the batch itself, because
+// batches are contiguous runs of chunks. Bounding the body therefore makes the
+// cost linear in C at a constant per batch, and leaves both kinds of context
+// the model actually uses intact.
+//
+// budget <= 0 disables the bound and sends the whole document.
+func docDigest(doc string, budget int) string {
+	if budget <= 0 || len(doc) <= budget {
+		return doc
+	}
+	// The opening is where a document says what it is: a title, a letterhead, a
+	// name, a CSV's header row. Cut on a line boundary so it does not end
+	// halfway through the sentence that names the subject.
+	head := doc[:budget*2/3]
+	if i := strings.LastIndexByte(head, '\n'); i > 0 {
+		head = head[:i]
+	}
+	// A byte offset can land inside a multi-byte rune, and a document with no
+	// newline in its head keeps that raw cut. Drop the broken tail rather than
+	// send a replacement character.
+	head = strings.ToValidUTF8(head, "")
+	var sb strings.Builder
+	sb.WriteString(head)
+	sb.WriteString("\n\n[...document truncated...]\n")
+	// The outline restores the global shape the truncation just removed, at a
+	// fraction of the size — and it is what tells the model that a chunk from
+	// the far end of a long document belongs to, say, a warranty appendix.
+	// Documents with no headings (a CSV, a plain text file) simply have none.
+	wroteHeader := false
+	for _, line := range strings.Split(doc, "\n") {
+		lvl, title := heading(line)
+		if lvl == 0 {
+			continue
+		}
+		if !wroteHeader {
+			sb.WriteString("\nHeadings in the full document:\n")
+			wroteHeader = true
+		}
+		if sb.Len()+len(title)+2*lvl > budget {
+			sb.WriteString("...\n")
+			break
+		}
+		sb.WriteString(strings.Repeat("  ", lvl-1))
+		sb.WriteString(title)
+		sb.WriteByte('\n')
+	}
+	return sb.String()
 }
 
 // fallbackContext derives a situating line from what ingest already knows —

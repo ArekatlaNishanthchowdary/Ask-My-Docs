@@ -571,9 +571,22 @@ frequency; Qdrant's `idf` modifier applies the weighting server-side. That is
 why `SparseEncode` is a pure function of one string with no index-wide state to
 keep in sync.
 
-**Contextual retrieval, batched, with a free floor.** Chunks are embedded with
-an LLM-written preamble situating them in their document — one call per
-document, not per chunk, with the body in the system prompt. When that preamble
+**Contextual retrieval, batched, bounded, with a free floor.** Chunks are
+embedded with an LLM-written preamble situating them in their document — one
+call per batch of chunks, not per chunk, with the document in the system
+prompt.
+
+That last part is quadratic if left alone: the body goes into every batch, so a
+document costs `ceil(chunks/batch) × |document|` prompt tokens, and the 197-chunk
+CSV in this corpus came to ~1.9M for one file. `CONTEXT_DOC_CHARS` bounds it.
+What the model needs from "the document" is what the document *is* — the opening
+lines and the heading outline — because the text around a chunk is already in
+the batch, batches being contiguous runs of chunks. Sending that instead of the
+body measured ~93× fewer tokens on the same CSV and makes the cost linear.
+It does not make ingest faster: the call count is unchanged and latency is
+dominated by generating the contexts, not by reading the prompt.
+
+When that preamble
 is missing — the call failed, the provider rate-limited it, the budget does not
 stretch to a large corpus — the chunk falls back to a line derived from its
 filename and heading path, at no tokens. Measured against the same

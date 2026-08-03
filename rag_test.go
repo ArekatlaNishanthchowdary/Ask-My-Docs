@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -336,5 +337,41 @@ func TestFallbackContextNamesTheDocument(t *testing.T) {
 	// a well-formed sentence rather than a dangling "section".
 	if got := fallbackContext("notes/q3 plan.md", ""); got != `From the document "q3 plan".` {
 		t.Errorf("sectionless fallbackContext = %q", got)
+	}
+}
+
+func TestDocDigestBoundsTheBodyButKeepsTheShape(t *testing.T) {
+	// Under budget, the document is passed through untouched — a short document
+	// is sent once or twice and bounding it would only lose information.
+	short := "# Title\n\nbody\n"
+	if got := docDigest(short, 6000); got != short {
+		t.Errorf("docDigest shortened a document already under budget: %q", got)
+	}
+	if got := docDigest(short, 0); got != short {
+		t.Errorf("budget 0 must disable the bound, got %q", got)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("# Acme Warranty Handbook\n\nIssued by Acme Corp.\n\n")
+	for i := range 60 {
+		fmt.Fprintf(&sb, "## Section %d\n\nbody-%d %s\n\n", i, i, strings.Repeat("filler ", 40))
+	}
+	got := docDigest(sb.String(), 3000)
+
+	if len(got) > 3300 {
+		t.Errorf("digest is %d chars, want it near the 3000 budget", len(got))
+	}
+	// The opening must survive: it is what names the document's subject.
+	if !strings.Contains(got, "Acme Warranty Handbook") {
+		t.Error("digest dropped the opening lines")
+	}
+	// A heading from past the truncation point must still appear, since the
+	// outline is the whole reason for not simply cutting the document short.
+	if !strings.Contains(got, "Section 40") {
+		t.Errorf("digest kept no headings from beyond the head:\n%s", got)
+	}
+	// Its body must not: that is exactly the cost being removed.
+	if strings.Contains(got, "body-40") {
+		t.Error("digest carried body text from beyond the head")
 	}
 }

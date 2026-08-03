@@ -72,6 +72,7 @@ type Config struct {
 	MaxChunkChars     int
 	ChunkOverlap      int
 	IngestConcurrency int
+	ContextDocChars   int
 
 	CorpusDir         string
 	MaxUploadMB       int
@@ -149,6 +150,11 @@ func LoadConfig() Config {
 		MaxChunkChars:     envInt("MAX_CHUNK_CHARS", 1600),
 		ChunkOverlap:      envInt("CHUNK_OVERLAP", 200),
 		IngestConcurrency: envInt("INGEST_CONCURRENCY", 8),
+		// Ceiling on how much of a document contextualization is allowed to
+		// resend per batch. See docDigest: this is the knob that decides whether
+		// a long document costs tokens proportional to its length or to its
+		// length squared. 0 disables the bound and restores the old behaviour.
+		ContextDocChars: envInt("CONTEXT_DOC_CHARS", 6000),
 
 		CorpusDir:         env("CORPUS_DIR", "corpus"),
 		MaxUploadMB:       envInt("MAX_UPLOAD_MB", 32),
