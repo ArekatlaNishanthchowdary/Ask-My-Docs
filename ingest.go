@@ -144,12 +144,19 @@ func (a *App) IngestDoc(ctx context.Context, docID, version string, acl []string
 	// time because the context is baked into the vector, so each rung needs its
 	// own QDRANT_COLLECTION rather than a flag on the query.
 	contexts := make([]string, len(chunks))
-	if !a.off("llmcontext") {
-		written, err := a.llm().Contextualize(ctx, docDigest(text, a.Cfg.ContextDocChars), chunks)
+	// Contextualizer is nil under CONTEXT_PROVIDER=none, which is the whole of
+	// what makes ingest algorithmic: chunk, embed, store, exactly as textbook
+	// RAG does it, with the derived context below standing in for the written
+	// one. It is not the same as ABLATE=llmcontext — that is an experiment
+	// switch and says so loudly on every run — but it produces the same index.
+	if a.Contextualizer != nil && !a.off("llmcontext") {
+		written, err := a.Contextualizer.Contextualize(ctx, docDigest(text, a.Cfg.ContextDocChars), chunks)
 		if err != nil {
-			// Retrieval quality degrades without the situating preamble, but the
-			// document is still findable. Do not fail the whole ingest over it.
-			fmt.Fprintf(os.Stderr, "warn: %s: contextualize failed, indexing raw chunks: %v\n", docID, err)
+			// Retrieval quality degrades without the written preamble, but the
+			// document is still findable: every chunk falls back to the derived
+			// context below rather than being indexed bare. Do not fail the
+			// whole ingest over it.
+			fmt.Fprintf(os.Stderr, "warn: %s: contextualize failed, falling back to derived context: %v\n", docID, err)
 		} else {
 			contexts = written
 		}

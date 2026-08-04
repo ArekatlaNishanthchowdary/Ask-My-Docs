@@ -42,6 +42,8 @@ type Config struct {
 	JudgeProvider         string
 	VerifyProvider        string
 	VerifyModel           string
+	ContextProvider       string
+	ContextModel          string
 	OpenAIBaseURL         string
 	OpenAIKey             string
 	OpenAIModel           string
@@ -117,6 +119,11 @@ func LoadConfig() Config {
 		// that provider's single configured model, and the second opinion the
 		// verifier exists to give comes from the model that wrote the claim.
 		VerifyModel: os.Getenv("VERIFY_MODEL"),
+		// Contextualization runs once per batch of chunks at ingest and never
+		// at query time, so it is the one stage where a small fast model is
+		// the obvious choice regardless of what generates answers.
+		ContextProvider: os.Getenv("CONTEXT_PROVIDER"),
+		ContextModel:    os.Getenv("CONTEXT_MODEL"),
 		// Defaults to Groq; point OPENAI_BASE_URL at OpenRouter, Together,
 		// Fireworks, vLLM or LM Studio to use those instead.
 		OpenAIBaseURL:         env("OPENAI_BASE_URL", "https://api.groq.com/openai/v1"),
@@ -229,6 +236,11 @@ type App struct {
 	// Verifier runs the entailment check; defaults to LLM.
 	Verifier LLM
 
+	// Contextualizer writes the situating preamble at ingest; defaults to LLM.
+	// Not runtime-swappable, unlike the three above: it only runs at ingest,
+	// and its output is already baked into the vectors of everything indexed.
+	Contextualizer LLM
+
 	// Tokens is nil when the server runs unauthenticated, which cmdServe only
 	// permits with ALLOW_ANONYMOUS set explicitly.
 	Tokens TokenStore
@@ -241,10 +253,11 @@ type App struct {
 	// requests are in flight. Embeddings are deliberately NOT swappable: the
 	// index holds vectors from one specific model, and changing it would not
 	// error — it would silently retrieve nonsense.
-	mu         sync.RWMutex
-	llmName    stageName
-	verifyName stageName
-	judgeName  stageName
+	mu          sync.RWMutex
+	llmName     stageName
+	verifyName  stageName
+	judgeName   stageName
+	contextName stageName
 }
 
 // stageName records which backend and model a stage is currently using, so the
@@ -437,6 +450,30 @@ func NewApp(cfg Config) (*App, error) {
 		a.Verifier = v
 	}
 
+	// Contextualization is separable for the opposite reason to the verifier:
+	// not because it needs to be independent, but because it is by far the
+	// highest-volume LLM stage and by far the simplest task. One query runs the
+	// generator once; indexing a 300-page document runs this ~100 times, and
+	// what it asks for each time is a single sentence saying where a chunk sits
+	// in its document. Tying that to the generator's model forces a choice
+	// between a good generator and an ingest that finishes — measured on a
+	// 780-chunk document, contextualization was over 95% of total ingest time
+	// whichever backend ran it.
+	a.Contextualizer = a.LLM
+	if cfg.ContextProvider == "none" {
+		// Ingest without any model call. The chunks still get a context line —
+		// fallbackContext derives one from the filename and heading path — so
+		// this is "no LLM", not "no context". Measured on a 302-page document:
+		// 26s here against 14m14s for the same document through a local 7B.
+		a.Contextualizer = nil
+	} else if cfg.ContextProvider != "" || cfg.ContextModel != "" {
+		c, _, err := buildLLM(cfg, firstNonEmpty(cfg.ContextProvider, cfg.LLMProvider), cfg.ContextModel)
+		if err != nil {
+			return nil, fmt.Errorf("CONTEXT_PROVIDER/CONTEXT_MODEL: %w", err)
+		}
+		a.Contextualizer = c
+	}
+
 	// The judge is independently selectable so answer_correctness can be
 	// measured by a model that had no hand in producing the answer. Comparing
 	// two generators is only meaningful when both are graded by the same
@@ -458,6 +495,10 @@ func NewApp(cfg Config) (*App, error) {
 	a.verifyName = describeStage(cfg, firstNonEmpty(cfg.VerifyProvider, cfg.LLMProvider))
 	if cfg.VerifyModel != "" {
 		a.verifyName.Model = cfg.VerifyModel
+	}
+	a.contextName = describeStage(cfg, firstNonEmpty(cfg.ContextProvider, cfg.LLMProvider))
+	if cfg.ContextModel != "" {
+		a.contextName.Model = cfg.ContextModel
 	}
 	a.judgeName = describeStage(cfg, firstNonEmpty(cfg.JudgeProvider, cfg.LLMProvider))
 	if cfg.JudgeProvider == "openai" && cfg.OpenAIJudgeModel != "" {

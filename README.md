@@ -882,6 +882,34 @@ cross-encoder the query path uses, chunks scoring 0.0001–0.0014 raw scored
 the model, far better than nothing, and it keeps contextualization an
 enhancement rather than a prerequisite.
 
+**Ingest does not need an LLM.** Extraction, chunking, embedding and indexing
+are algorithmic; the only model call is the situating preamble, and it is
+optional. It is also the entire cost. Measured on one 302-page document (780
+chunks), same machine, same everything else:
+
+| Contextualizer | Time | Note |
+|---|---:|---|
+| `CONTEXT_PROVIDER=none` | **19s** | no model call; chunks still get a derived context line |
+| local `qwen2.5:1.5b` | 1m14s | ✗ returned 14 contexts for a batch of 8 — every batch failed and fell back |
+| local `qwen2.5:7b` | **14m14s** | GPU pinned at 100% the whole time |
+
+So the answer to "why is this taking forever" is almost always that stage, and
+`CONTEXT_PROVIDER=none` is a fully local, fully algorithmic ingest — which is
+what textbook RAG does anyway. `CONTEXT_PROVIDER` / `CONTEXT_MODEL` also let it
+run on a small local model while a large hosted one still writes answers,
+mirroring `VERIFY_PROVIDER` / `VERIFY_MODEL`.
+
+What you give up is measurable rather than theoretical: the same chunks score
+0.0001–0.0014 with no context, **0.010–0.094 with the derived line**, and
+0.13–0.39 with a written one against the same cross-encoder. The derived line
+is much worse than a model and far better than nothing.
+
+> [!TIP]
+> A model too small to hold the batch contract is worse than no model at all —
+> it costs the time and then falls back anyway. If you see
+> `contextualize failed, falling back to derived context`, either use a bigger
+> model or set `none` and keep the 14 minutes.
+
 **Unchanged documents are skipped.** Every chunk stores the source file's mtime
 as `version`; `ingest` counts a document's chunks at the current version and
 skips it if they are already there. Contextualization re-sends the document body
