@@ -61,32 +61,72 @@ jobs:
       - name: Build
         run: go build -o ask-my-docs .
 
-      # A repo with no golden items has nothing to gate. Skip loudly rather
-      # than failing red — or worse, passing green and implying the quality
-      # gate ran when it did not.
-      - name: Check for eval items
-        id: golden
+      # The gate needs three things, and for most of this repo's life it only
+      # checked one of them.
+      #
+      # While eval/golden.jsonl was empty, every step below was skipped and the
+      # job reported green — a passing build that measured nothing. Adding
+      # golden items turned the steps on and the job went red on a missing
+      # VOYAGE_API_KEY, which had never been set. The check was not wrong about
+      # golden items; it was wrong that golden items were sufficient.
+      #
+      # So check all three, and when any is missing skip *visibly*: a warning
+      # in the log, a note in the job summary, and a green build that does not
+      # pretend a quality gate ran.
+      - name: Can the gate run?
+        id: gate
         run: |
+          reasons=()
           n=$(grep -cve '^\s*$' -e '^\s*//' eval/golden.jsonl || true)
-          echo "count=$n" >> "$GITHUB_OUTPUT"
           if [ "$n" -eq 0 ]; then
-            echo "::warning::eval/golden.jsonl is empty — the quality gate is NOT running."
+            reasons+=('`eval/golden.jsonl` has no items')
+          fi
+          # corpus/ is gitignored except its README, so a fresh checkout has
+          # nothing to index. Golden items reference chunk ids from documents
+          # that are deliberately not published, and `eval` fails fast on ids
+          # it cannot find rather than scoring them 0 forever.
+          docs=$(find corpus -type f ! -name 'README.md' | wc -l)
+          if [ "$docs" -eq 0 ]; then
+            reasons+=('`corpus/` has no documents (gitignored — commit a CI corpus to gate)')
+          fi
+          if [ -z "$VOYAGE_API_KEY" ] || [ -z "$ANTHROPIC_API_KEY" ]; then
+            reasons+=('`VOYAGE_API_KEY` / `ANTHROPIC_API_KEY` are not set as repository secrets')
           fi
 
+          if [ ${#reasons[@]} -eq 0 ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "### Quality gate running — $n golden items, $docs documents" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "run=false" >> "$GITHUB_OUTPUT"
+          {
+            echo "### ⚠️ Quality gate SKIPPED"
+            echo
+            echo "This build is green because the unit tests passed. **No quality"
+            echo "or latency metric was measured.** Missing:"
+            echo
+            for r in "${reasons[@]}"; do echo "- $r"; done
+            echo
+            echo "See _Evaluation and CI gating_ in the README to turn it on."
+          } >> "$GITHUB_STEP_SUMMARY"
+          for r in "${reasons[@]}"; do
+            echo "::warning::quality gate skipped: ${r//\`/}"
+          done
+
       - name: Index the corpus
-        if: steps.golden.outputs.count != '0'
+        if: steps.gate.outputs.run == 'true'
         run: ./ask-my-docs ingest -dir corpus
 
       # Fails the build if any gated metric regresses more than the tolerance
       # against eval/baseline.json. Regenerate a baseline deliberately with:
       #   ./ask-my-docs eval -update-baseline
       - name: Run gated eval
-        if: steps.golden.outputs.count != '0'
+        if: steps.gate.outputs.run == 'true'
         run: ./ask-my-docs eval -out metrics.json -tolerance 0.02
 
       # Kept regardless of outcome so regressions are diffable across runs.
       - name: Upload metrics
-        if: always() && steps.golden.outputs.count != '0'
+        if: always() && steps.gate.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: eval-metrics-${{ github.sha }}

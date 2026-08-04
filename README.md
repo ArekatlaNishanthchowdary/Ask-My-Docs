@@ -660,12 +660,33 @@ negative-rejection case.
 | `generate_p95_ms`, `verify_p95_ms` | The two hosted stages — reported, never gated | |
 | `latency_p50/p95/p99_ms` | End to end, under the same budget `/query` enforces | |
 
-`.github/workflows/eval.yml` runs this against a real Qdrant on every PR and
-uploads `metrics.json` so runs are diffable. The gate uses **separate quality
-and latency tolerances**: the five quality metrics may not drop by more than an
-absolute tolerance, and `retrieve_p95_ms` / `rerank_p95_ms` may not rise by
-more than a relative one. (A single shared tolerance flapped — it passed one
-run and failed the next.)
+The gate uses **separate quality and latency tolerances**: the five quality
+metrics may not drop by more than an absolute tolerance, and
+`retrieve_p95_ms` / `rerank_p95_ms` may not rise by more than a relative one.
+(A single shared tolerance flapped — it passed one run and failed the next.)
+
+> [!WARNING]
+> **In this repository the gate is skipped, not enforced.** `eval.yml` needs
+> three things, and a public checkout has one of them:
+>
+> | | Status here | Why |
+> |---|---|---|
+> | Golden items | ✅ 33 | `eval/golden.jsonl` is committed |
+> | A corpus to index | ❌ | `corpus/` is gitignored — nobody should publish their documents by accident |
+> | Provider secrets | ❌ | No `VOYAGE_API_KEY` / `ANTHROPIC_API_KEY` are set |
+>
+> The job says so in its summary and stays green, because a red build that
+> means "you did not configure optional secrets" trains people to ignore red
+> builds. But **green here means the unit tests passed and nothing else was
+> measured.** Run `eval` locally, where your corpus and keys actually are.
+
+To enforce it in CI you need a corpus that is safe to commit — a handful of
+synthetic documents under `corpus/`, with `eval/golden.jsonl` rewritten against
+*their* chunk ids — plus the two secrets. Both are deliberate acts, which is
+the right shape for a gate: it should be obvious whether it is on.
+
+`metrics.json` is uploaded as an artifact whenever the gate does run, so runs
+are diffable.
 
 **Chunk ids are the contract.** Change chunking and the ids in the golden set
 change with it — regenerate with `chunks -dir` and re-baseline.
