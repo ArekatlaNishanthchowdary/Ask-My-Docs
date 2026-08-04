@@ -505,6 +505,22 @@ run and failed the next.)
 **Chunk ids are the contract.** Change chunking and the ids in the golden set
 change with it — regenerate with `chunks -dir` and re-baseline.
 
+**Reading the latency numbers.** `generate_p95_ms` and `verify_p95_ms` are
+reported but not gated, because they measure a hosted provider's mood rather
+than this code. Measured on NVIDIA NIM, verification is the dominant stage
+(~9.5s against ~5.4s for generation) — it is one request that reasons through
+every claim in sequence, traded that way because tokens per minute, not
+requests, is what a metered endpoint limits.
+
+The end-to-end tail is not a pipeline defect. An identical three-character
+request to the same endpoint returns in ~1s warm and sporadically stalls 30-50s,
+independent of prompt size or `max_tokens`; two such stalls in one query is
+where a 21s median grows a 160s p95. Nothing in this repo can fix that, so
+`eval` at least stops reporting latencies no deployed query could produce: each
+item now runs under `REQUEST_TIMEOUT_SEC`, the same budget `/query` enforces.
+Use `eval -verbose` for the per-item `TOTAL`/`GEN`/`VERIFY` columns when a tail
+needs a stage attached to it.
+
 Baselines are config-specific and **not comparable across backends**. There is
 none in this checkout; generate yours with `eval -update-baseline`.
 

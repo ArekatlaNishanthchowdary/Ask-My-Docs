@@ -215,6 +215,7 @@ func (o *OpenAICompat) post(ctx context.Context, body []byte) ([]byte, int, erro
 	const maxAttempts = 5
 	var raw []byte
 	var status int
+	var slept time.Duration // total time spent backing off, across attempts
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.BaseURL+"/chat/completions", bytes.NewReader(body))
@@ -257,12 +258,17 @@ func (o *OpenAICompat) post(ctx context.Context, body []byte) ([]byte, int, erro
 		// provider asks for longer than any request should live, stop and return
 		// the 429 so the caller reports "daily token limit reached" instead of
 		// sleeping for an hour and surfacing a meaningless deadline error.
-		if wait > o.MaxBackoff {
+		//
+		// The cap is a budget for the whole call, not for one sleep. Checked
+		// per-sleep it bounded nothing useful: four retries just under a 45s cap
+		// legally sat for ~180s, which is how a p50 of 21s grew a p95 of 162s.
+		if slept+wait > o.MaxBackoff {
 			if debugLLM {
-				log.Printf("[llm] retry-after %s exceeds the %s cap; failing fast", wait, o.MaxBackoff)
+				log.Printf("[llm] backoff budget spent (%s + %s > %s cap); failing fast", slept, wait, o.MaxBackoff)
 			}
 			return raw, status, nil
 		}
+		slept += wait
 		if debugLLM {
 			log.Printf("[llm] backing off %s (retry-after=%q)", wait, retryAfter)
 		}
@@ -324,13 +330,13 @@ func (o *OpenAICompat) Contextualize(ctx context.Context, doc string, chunks []C
 				"type": "object",
 				"properties": map[string]any{
 					// Pinned length for the same reason as the verify schema: an
-				// unconstrained array lets the model return [] and still be valid.
-				"contexts": map[string]any{
-					"type":     "array",
-					"items":    map[string]any{"type": "string"},
-					"minItems": len(batch),
-					"maxItems": len(batch),
-				},
+					// unconstrained array lets the model return [] and still be valid.
+					"contexts": map[string]any{
+						"type":     "array",
+						"items":    map[string]any{"type": "string"},
+						"minItems": len(batch),
+						"maxItems": len(batch),
+					},
 				},
 				"required":             []string{"contexts"},
 				"additionalProperties": false,
@@ -368,12 +374,16 @@ func (o *OpenAICompat) Answer(ctx context.Context, question string, sources []So
 	return a, err
 }
 
-// Verify checks each claim independently and concurrently.
+// Verify checks every claim in one request.
 //
-// Batching them into one request looks cheaper but serialises the model's
-// reasoning across every claim, and that reasoning — not the network — is the
-// cost: a six-claim answer took 40s as one call. Split, the claims overlap and
-// the stage costs about as much as its slowest single check.
+// This is a deliberate latency-for-tokens trade, not the cheapest wall clock.
+// One call per claim runs the checks concurrently and finishes in about the
+// time of its slowest check, but it retransmits the evidence once per claim.
+// Batched, the model reasons through the claims in sequence, so the stage costs
+// roughly the sum — which is why verify dominates query latency and is the
+// first place to look when the tail grows. Tokens per minute, not requests, is
+// what a metered endpoint limits, and that is the constraint this project is
+// built under.
 func (o *OpenAICompat) Verify(ctx context.Context, pairs []VerifyPair) ([]bool, error) {
 	if len(pairs) == 0 {
 		return nil, nil

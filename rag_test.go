@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The non-trivial logic in this system that does not need a network: chunking,
@@ -403,5 +407,39 @@ func TestParseAblateRejectsUnknownStages(t *testing.T) {
 
 	if got, err := parseAblate(""); err != nil || len(got) != 0 {
 		t.Errorf("empty ABLATE = %v, %v; want no stages disabled", got, err)
+	}
+}
+
+// The backoff cap is a budget for the whole call, not for one sleep. Checked
+// per-sleep, four retries just under the cap could legally sit for four times
+// it — the shape of the 162s p95 this was written to stop.
+func TestPostBacksOffWithinItsTotalBudget(t *testing.T) {
+	var attempts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.Header().Set("retry-after", "0.4") // +500ms slop = 900ms per sleep
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"slow down"}}`))
+	}))
+	defer srv.Close()
+
+	o := &OpenAICompat{BaseURL: srv.URL, MaxBackoff: 2 * time.Second, HTTP: srv.Client()}
+	start := time.Now()
+	_, status, err := o.post(context.Background(), []byte(`{}`))
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("post returned an error rather than the 429: %v", err)
+	}
+	if status != http.StatusTooManyRequests {
+		t.Errorf("status = %d, want 429 so the caller can report the provider's own message", status)
+	}
+	// Two 900ms sleeps fit in the 2s budget; a third would not, so the call
+	// gives up after three attempts rather than sleeping out all five.
+	if attempts != 3 {
+		t.Errorf("attempts = %d, want 3 (two sleeps inside a 2s budget)", attempts)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("post took %s, over its own %s cap", elapsed.Round(time.Millisecond), 2*time.Second)
 	}
 }

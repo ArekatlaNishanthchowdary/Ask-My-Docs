@@ -39,7 +39,12 @@ type Metrics struct {
 	LatencyP99        int64   `json:"latency_p99_ms"`
 	RetrieveP95       int64   `json:"retrieve_p95_ms"`
 	RerankP95         int64   `json:"rerank_p95_ms"`
-	Failures          int     `json:"failures"`
+	// The two hosted stages. Not gated — they track a provider's mood, not this
+	// code — but reported, because without them a total-latency tail has no
+	// stage attached to it and there is nothing to act on.
+	GenerateP95 int64 `json:"generate_p95_ms"`
+	VerifyP95   int64 `json:"verify_p95_ms"`
+	Failures    int   `json:"failures"`
 }
 
 // gated lists the metrics CI enforces. Direction is "higher is better" for
@@ -82,6 +87,7 @@ type ItemResult struct {
 	Judge     float64
 	Judged    bool
 	TotalMS   int64
+	Timings   Timings // stage breakdown, so a latency tail names the stage that caused it
 	Note      string
 }
 
@@ -89,7 +95,7 @@ type ItemResult struct {
 func (a *App) RunEval(ctx context.Context, items []GoldenItem, judge bool) (Metrics, []ItemResult, error) {
 	var m Metrics
 	var recalls, ndcgs, rrs, baseNDCG, citP, citR, correct []float64
-	var totals, retrieves, reranks []int64
+	var totals, retrieves, reranks, generates, verifies []int64
 	results := make([]ItemResult, 0, len(items))
 
 	for _, it := range items {
@@ -136,7 +142,13 @@ func (a *App) RunEval(ctx context.Context, items []GoldenItem, judge bool) (Metr
 
 		// Generation-stage items additionally exercise citation and answer quality.
 		if it.Stage == "generation" || it.Gold != "" {
-			resp, err := a.Query(ctx, QueryRequest{Question: it.Query, ACL: it.ACL, NoCache: true})
+			// Under the same budget the server gives a real request. Without it
+			// eval reports latencies no deployed query could ever produce: the
+			// HTTP client alone allows five minutes per call, so one stalled
+			// hosted request becomes a p95 describing a system nobody runs.
+			qctx, cancel := context.WithTimeout(ctx, time.Duration(a.Cfg.RequestTimeoutSec)*time.Second)
+			resp, err := a.Query(qctx, QueryRequest{Question: it.Query, ACL: it.ACL, NoCache: true})
+			cancel()
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "eval %s: %v\n", it.ID, err)
 				m.Failures++
@@ -146,6 +158,9 @@ func (a *App) RunEval(ctx context.Context, items []GoldenItem, judge bool) (Metr
 			}
 			totals = append(totals, resp.Timings.Total)
 			res.TotalMS = resp.Timings.Total
+			res.Timings = resp.Timings
+			generates = append(generates, resp.Timings.Generate)
+			verifies = append(verifies, resp.Timings.Verify)
 			res.Refused = !resp.Sufficient
 			if len(resp.Warnings) > 0 {
 				res.Note = resp.Warnings[0]
@@ -203,6 +218,8 @@ func (a *App) RunEval(ctx context.Context, items []GoldenItem, judge bool) (Metr
 	m.LatencyP99 = pct(totals, 0.99)
 	m.RetrieveP95 = pct(retrieves, 0.95)
 	m.RerankP95 = pct(reranks, 0.95)
+	m.GenerateP95 = pct(generates, 0.95)
+	m.VerifyP95 = pct(verifies, 0.95)
 	return m, results, nil
 }
 
@@ -214,8 +231,10 @@ func ReportItems(results []ItemResult) {
 	sorted := append([]ItemResult(nil), results...)
 	sort.SliceStable(sorted, func(i, j int) bool { return itemScore(sorted[i]) < itemScore(sorted[j]) })
 
-	fmt.Printf("\n%-24s %-11s %5s %6s %-8s %-22s %s\n",
-		"ITEM", "STAGE", "RANK", "TOP", "JUDGE", "CITED", "NOTE")
+	// The three latency columns are the whole point of printing per item: an
+	// aggregate p95 says the tail exists, these say which stage it lives in.
+	fmt.Printf("\n%-24s %-11s %5s %6s %-8s %7s %7s %7s %-22s %s\n",
+		"ITEM", "STAGE", "RANK", "TOP", "JUDGE", "TOTAL", "GEN", "VERIFY", "CITED", "NOTE")
 	for _, r := range sorted {
 		rank := "-"
 		if r.FirstRank > 0 {
@@ -229,8 +248,9 @@ func ReportItems(results []ItemResult) {
 		if r.Refused && note == "" {
 			note = "refused"
 		}
-		fmt.Printf("%-24s %-11s %5s %6.2f %-8s %-22s %s\n",
+		fmt.Printf("%-24s %-11s %5s %6.2f %-8s %7d %7d %7d %-22s %s\n",
 			r.ID, r.Stage, rank, r.TopScore, judge,
+			r.TotalMS, r.Timings.Generate, r.Timings.Verify,
 			truncate(strings.Join(r.Cited, ","), 22), note)
 	}
 }
