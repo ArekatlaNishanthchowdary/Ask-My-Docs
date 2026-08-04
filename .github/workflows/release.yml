@@ -47,7 +47,7 @@ jobs:
         run: |
           set -euo pipefail
           name="ask-my-docs-${{ steps.tag.outputs.ref }}-${GOOS}-${GOARCH}"
-          mkdir -p "dist/$name/corpus"
+          mkdir -p "dist/$name/corpus" "dist/$name/eval"
           go build -trimpath \
             -ldflags "-s -w -X main.version=${{ steps.tag.outputs.ref }}" \
             -o "dist/$name/ask-my-docs${{ matrix.ext }}" .
@@ -55,6 +55,14 @@ jobs:
           # "something a stranger can actually run".
           cp README.md LICENSE .env.example docker-compose.yml docker-compose.gpu.yml "dist/$name/"
           cp corpus/README.md "dist/$name/corpus/"
+          # The fixture corpus and the eval set scored against it, so `eval`
+          # runs out of the box on a fictional corpus instead of requiring
+          # someone to write a golden set before they can see anything work.
+          # eval/golden.jsonl is not shipped: it scores against corpus/, which
+          # nobody else has. No baseline either — baselines are config-specific
+          # and one recorded elsewhere would gate against the wrong numbers.
+          cp -r eval/fixtures "dist/$name/eval/"
+          cp eval/ci-golden.jsonl "dist/$name/eval/"
 
       - name: Package
         id: pkg

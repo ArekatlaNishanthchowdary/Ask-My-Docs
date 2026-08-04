@@ -157,8 +157,8 @@ unpack it, and you have the binary **plus** the files it needs to run:
 `.env.example`, `docker-compose.yml`, `README.md`, `LICENSE`.
 
 ```bash
-tar -xzf ask-my-docs-v0.10.1-linux-amd64.tar.gz
-cd ask-my-docs-v0.10.1-linux-amd64
+tar -xzf ask-my-docs-v0.11.0-linux-amd64.tar.gz
+cd ask-my-docs-v0.11.0-linux-amd64
 sha256sum -c --ignore-missing SHA256SUMS.txt   # optional, verify the download
 ./ask-my-docs version
 ```
