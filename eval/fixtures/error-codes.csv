@@ -1,0 +1,13 @@
+code,component,meaning,first action
+ORB-1004,ingest,Payload rejected because its declared checksum did not match the bytes received,Re-upload the payload; do not retry the same request
+ORB-1109,ingest,Document exceeded the per-file size ceiling,Split the document or raise MAX_UPLOAD_MB
+ORB-2201,scheduler,No worker accepted the job within the placement window,Check worker pool capacity before retrying
+ORB-2277,scheduler,Job was placed twice because a heartbeat was lost mid-placement,Deduplicate by job id; the second result is discarded
+ORB-3010,storage,Write quorum not reached on the primary shard,Wait for the shard to recover; writes are rejected not queued
+ORB-3115,storage,Read returned a tombstone for a key that should exist,Escalate to the storage owner with the key and timestamp
+ORB-4412,auth,Bearer token was valid but carried no permission tags,Reissue the token with an explicit tag list
+ORB-4419,auth,Token signature verified against a retired signing key,Rotate the caller to the current key; the retired key stops working in 14 days
+ORB-5001,billing,Usage record arrived after the billing period closed,Record lands in the next period; no manual adjustment needed
+ORB-5107,billing,Currency conversion rate was stale by more than 24 hours,Refuse the invoice and refresh the rate table
+ORB-6203,telemetry,Metric cardinality exceeded the per-tenant limit,Drop the offending label before re-enabling the exporter
+ORB-6250,telemetry,Trace was sampled out but its child spans were not,Fix the propagation header; the trace is unusable as recorded

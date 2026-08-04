@@ -1,0 +1,19 @@
+{
+  "n": 19,
+  "recall_at_10": 1,
+  "ndcg_at_10": 0.9565799710084067,
+  "mrr": 0.9411764705882353,
+  "retrieval_ndcg_at_10": 0.9565799710084067,
+  "rerank_lift": 0,
+  "citation_precision": 1,
+  "citation_recall": 1,
+  "answer_correctness": 0,
+  "latency_p50_ms": 163,
+  "latency_p95_ms": 34836,
+  "latency_p99_ms": 34836,
+  "retrieve_p95_ms": 0,
+  "rerank_p95_ms": 0,
+  "generate_p95_ms": 11945,
+  "verify_p95_ms": 22322,
+  "failures": 0
+}

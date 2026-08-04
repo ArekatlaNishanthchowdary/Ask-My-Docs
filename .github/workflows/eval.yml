@@ -29,12 +29,19 @@ jobs:
       - run: go test ./...
       - run: go build ./...
 
-  # Quality + performance gate. Runs the real pipeline against a real index.
+  # Quality gate. Runs the real pipeline against a real index.
   #
-  # This job uses PROVIDER=cloud: GitHub-hosted runners have no GPU, so a local
-  # 7B would take tens of minutes per run. To gate the local stack instead, move
-  # this job to a self-hosted runner with Ollama and set PROVIDER=ollama — the
-  # baseline is provider-specific, so regenerate eval/baseline.json when you do.
+  # PROVIDER=nvidia because NIM serves embeddings *and* generation from one key,
+  # so the gate needs a single secret rather than a pair. GitHub-hosted runners
+  # have no GPU, so a local 7B is not an option here; to gate the local stack
+  # instead, move this job to a self-hosted runner with Ollama, set
+  # PROVIDER=ollama, and regenerate the baseline — baselines are config-specific
+  # and not comparable across backends.
+  #
+  # It scores eval/ci-golden.jsonl against eval/fixtures/, both committed. The
+  # everyday set under eval/golden.jsonl references chunk ids from corpus/,
+  # which is gitignored so nobody publishes their documents by accident — CI
+  # could never resolve those ids.
   eval:
     runs-on: ubuntu-latest
     needs: unit
@@ -46,11 +53,22 @@ jobs:
         options: >-
           --health-cmd "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333'"
           --health-interval 5s --health-timeout 3s --health-retries 20
+      # Without a cross-encoder the reranker falls back to an LLM scoring all 50
+      # candidates, which is both slower and far more expensive per run than the
+      # rest of the gate put together. CPU image: the runner has no GPU.
+      reranker:
+        image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.7
+        ports: ["8081:80"]
+        env:
+          MODEL_ID: BAAI/bge-reranker-v2-m3
     env:
-      PROVIDER: cloud
+      PROVIDER: nvidia
+      LLM_PROVIDER: nvidia
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
       QDRANT_URL: http://localhost:6333
-      VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      QDRANT_COLLECTION: ci_fixtures
+      QDRANT_CACHE_COLLECTION: ci_cache
+      RERANKER_URL: http://localhost:8081
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -73,29 +91,41 @@ jobs:
       # So check all three, and when any is missing skip *visibly*: a warning
       # in the log, a note in the job summary, and a green build that does not
       # pretend a quality gate ran.
+      # The gate needs its inputs present, and for most of this repo's life it
+      # only checked one of them.
+      #
+      # While eval/golden.jsonl was empty, every step below was skipped and the
+      # job reported green — a passing build that measured nothing. Adding
+      # golden items turned the steps on and the job went red on a secret that
+      # had never been set. The check was not wrong about golden items; it was
+      # wrong that golden items were sufficient.
+      #
+      # So check everything, and when any input is missing skip *visibly*: a
+      # warning per reason, a job summary saying in as many words that nothing
+      # was measured, and a green build. Red for "you did not configure an
+      # optional secret" is how people learn to ignore red.
       - name: Can the gate run?
         id: gate
         run: |
           reasons=()
-          n=$(grep -cve '^\s*$' -e '^\s*//' eval/golden.jsonl || true)
+          n=$(grep -cve '^\s*$' -e '^\s*//' eval/ci-golden.jsonl || true)
           if [ "$n" -eq 0 ]; then
-            reasons+=('`eval/golden.jsonl` has no items')
+            reasons+=('`eval/ci-golden.jsonl` has no items')
           fi
-          # corpus/ is gitignored except its README, so a fresh checkout has
-          # nothing to index. Golden items reference chunk ids from documents
-          # that are deliberately not published, and `eval` fails fast on ids
-          # it cannot find rather than scoring them 0 forever.
-          docs=$(find corpus -type f ! -name 'README.md' | wc -l)
+          docs=$(find eval/fixtures -type f | wc -l)
           if [ "$docs" -eq 0 ]; then
-            reasons+=('`corpus/` has no documents (gitignored — commit a CI corpus to gate)')
+            reasons+=('`eval/fixtures/` is empty — there is nothing to index')
           fi
-          if [ -z "$VOYAGE_API_KEY" ] || [ -z "$ANTHROPIC_API_KEY" ]; then
-            reasons+=('`VOYAGE_API_KEY` / `ANTHROPIC_API_KEY` are not set as repository secrets')
+          if [ ! -s eval/ci-baseline.json ]; then
+            reasons+=('`eval/ci-baseline.json` is missing — nothing to compare against')
+          fi
+          if [ -z "$NVIDIA_API_KEY" ]; then
+            reasons+=('`NVIDIA_API_KEY` is not set as a repository secret')
           fi
 
           if [ ${#reasons[@]} -eq 0 ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "### Quality gate running — $n golden items, $docs documents" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Quality gate running — $n golden items over $docs documents" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           echo "run=false" >> "$GITHUB_OUTPUT"
@@ -103,7 +133,7 @@ jobs:
             echo "### ⚠️ Quality gate SKIPPED"
             echo
             echo "This build is green because the unit tests passed. **No quality"
-            echo "or latency metric was measured.** Missing:"
+            echo "metric was measured.** Missing:"
             echo
             for r in "${reasons[@]}"; do echo "- $r"; done
             echo
@@ -113,16 +143,44 @@ jobs:
             echo "::warning::quality gate skipped: ${r//\`/}"
           done
 
-      - name: Index the corpus
+      # A service container's health check cannot express "the model finished
+      # downloading", and TEI pulls ~2GB before it serves. Waiting here fails
+      # with a clear message rather than as a confusing rerank error later.
+      - name: Wait for the reranker
         if: steps.gate.outputs.run == 'true'
-        run: ./ask-my-docs ingest -dir corpus
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8081/health >/dev/null; then
+              echo "reranker ready after ${i}0s"; exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::reranker did not become ready in 10 minutes"; exit 1
 
-      # Fails the build if any gated metric regresses more than the tolerance
-      # against eval/baseline.json. Regenerate a baseline deliberately with:
-      #   ./ask-my-docs eval -update-baseline
+      - name: Index the fixtures
+        if: steps.gate.outputs.run == 'true'
+        run: ./ask-my-docs ingest -dir eval/fixtures
+
+      # Fails the build if a gated metric regresses past the tolerance against
+      # eval/ci-baseline.json. Regenerate deliberately, and only when a change
+      # is meant to move the numbers:
+      #   PROVIDER=nvidia LLM_PROVIDER=nvidia QDRANT_COLLECTION=ci_fixtures \
+      #     ./ask-my-docs ingest -dir eval/fixtures
+      #   PROVIDER=nvidia LLM_PROVIDER=nvidia QDRANT_COLLECTION=ci_fixtures \
+      #     ./ask-my-docs eval -golden eval/ci-golden.jsonl \
+      #       -baseline eval/ci-baseline.json -judge=false -update-baseline
+      #
+      # -judge=false: the judge would be the model that wrote the answers,
+      # which measured 0.15-0.19 too generous. A real correctness gate needs a
+      # second, independent key; until there is one, not measuring it is more
+      # honest than measuring it wrong.
       - name: Run gated eval
         if: steps.gate.outputs.run == 'true'
-        run: ./ask-my-docs eval -out metrics.json -tolerance 0.02
+        run: |
+          ./ask-my-docs eval \
+            -golden eval/ci-golden.jsonl \
+            -baseline eval/ci-baseline.json \
+            -out metrics.json -judge=false -verbose -tolerance 0.02
 
       # Kept regardless of outcome so regressions are diffable across runs.
       - name: Upload metrics

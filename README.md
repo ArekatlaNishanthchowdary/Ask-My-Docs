@@ -665,28 +665,72 @@ metrics may not drop by more than an absolute tolerance, and
 `retrieve_p95_ms` / `rerank_p95_ms` may not rise by more than a relative one.
 (A single shared tolerance flapped — it passed one run and failed the next.)
 
-> [!WARNING]
-> **In this repository the gate is skipped, not enforced.** `eval.yml` needs
-> three things, and a public checkout has one of them:
->
-> | | Status here | Why |
-> |---|---|---|
-> | Golden items | ✅ 33 | `eval/golden.jsonl` is committed |
-> | A corpus to index | ❌ | `corpus/` is gitignored — nobody should publish their documents by accident |
-> | Provider secrets | ❌ | No `VOYAGE_API_KEY` / `ANTHROPIC_API_KEY` are set |
->
-> The job says so in its summary and stays green, because a red build that
-> means "you did not configure optional secrets" trains people to ignore red
-> builds. But **green here means the unit tests passed and nothing else was
-> measured.** Run `eval` locally, where your corpus and keys actually are.
+### Two eval sets, and why
 
-To enforce it in CI you need a corpus that is safe to commit — a handful of
-synthetic documents under `corpus/`, with `eval/golden.jsonl` rewritten against
-*their* chunk ids — plus the two secrets. Both are deliberate acts, which is
-the right shape for a gate: it should be obvious whether it is on.
+| | Scored against | Committed? | Used by |
+|---|---|---|---|
+| `eval/golden.jsonl` | `corpus/` — your documents | items yes, corpus **no** | you, locally |
+| `eval/ci-golden.jsonl` | `eval/fixtures/` — a fictional corpus | **yes, both** | CI |
 
-`metrics.json` is uploaded as an artifact whenever the gate does run, so runs
-are diffable.
+`corpus/` is gitignored so nobody publishes their own documents by accident,
+which also means CI can never resolve the chunk ids the everyday set
+references. So CI scores a second set against `eval/fixtures/`: five invented
+documents about a company that does not exist, chosen to exercise both
+retrieval legs — exact identifiers (`ORB-4412`, serial `RF-00417`) for the
+sparse leg, and paraphrases sharing almost no vocabulary with their source for
+the dense one.
+
+It is deliberately cheap. Of 19 items only three call the generator; the rest
+stop after reranking, and the two out-of-corpus negatives are refused before
+any model call. One push costs roughly fifteen API calls.
+
+```bash
+# Re-baseline after a change that is *meant* to move the numbers
+PROVIDER=nvidia LLM_PROVIDER=nvidia QDRANT_COLLECTION=ci_fixtures \
+  ./ask-my-docs ingest -dir eval/fixtures
+PROVIDER=nvidia LLM_PROVIDER=nvidia QDRANT_COLLECTION=ci_fixtures \
+  ./ask-my-docs eval -golden eval/ci-golden.jsonl \
+    -baseline eval/ci-baseline.json -judge=false -update-baseline
+```
+
+> [!NOTE]
+> **The gate is only as on as its secret.** `eval.yml` needs `NVIDIA_API_KEY`
+> in repository secrets — NIM was chosen over a Voyage/Anthropic pair because
+> it serves embeddings *and* generation from one key. Without it the job says
+> so in its summary and stays green, because a red build meaning "you did not
+> configure an optional secret" trains people to ignore red builds. **Green
+> without the secret means the unit tests passed and nothing else was
+> measured.**
+
+Two things are deliberately not gated in CI:
+
+- **`answer_correctness`.** The judge would be the model that wrote the
+  answers, which measured 0.15–0.19 too generous. A real gate needs a second
+  independent key; until there is one, not measuring is more honest than
+  measuring wrong.
+- **`retrieve_p95_ms` / `rerank_p95_ms`.** They are zeroed in
+  `eval/ci-baseline.json`, and `CompareBaseline` skips any metric whose
+  baseline is zero. The committed numbers were measured against a GPU
+  reranker; CI runs TEI on CPU, so gating them would fail every build on
+  hardware rather than on code. To turn latency gating on, take
+  `retrieve_p95_ms` and `rerank_p95_ms` from a CI run's `metrics.json`
+  artifact and put those into the baseline.
+
+Determinism is what makes the 0.02 tolerance safe: at `temperature 0` with a
+fixed seed, three clean runs produced **bit-identical** quality metrics
+(`ndcg_at_10` 0.9565799710084067 every time). A quality metric moving here is a
+real change, not a reroll.
+
+`metrics.json` is uploaded as an artifact whenever the gate runs, so runs are
+diffable.
+
+> [!TIP]
+> `rerank_lift` is **0.00** on this fixture corpus, and that is reported rather
+> than hidden. With 25 chunks, retrieval alone already ranks nearly perfectly,
+> so the cross-encoder has nothing left to fix. The lift is a real number on a
+> real corpus ([+0.164](#whats-measured) on the 33-item set) — it is not a
+> number a 25-chunk fixture set can produce, and a fixture tuned until it did
+> would be measuring the fixture.
 
 **Chunk ids are the contract.** Change chunking and the ids in the golden set
 change with it — regenerate with `chunks -dir` and re-baseline.

@@ -1,0 +1,33 @@
+Orbital Dynamics — Bench Hardware Inventory (fictional)
+
+Bench 1 (RF)
+  1x  Signal generator, Rohde-equivalent model SG-4400, serial RF-00912
+  1x  Spectrum analyser SA-2100, 9 kHz to 3 GHz, serial RF-00417
+  2x  Directional coupler DC-30, 30 dB, N-type
+  1x  Noise figure meter NF-88, on loan from the Delft site until March
+
+Bench 2 (power)
+  1x  Programmable DC supply PS-3060, 0-30 V, 0-6 A, serial PW-01188
+  1x  Electronic load EL-150, 150 W, serial PW-01203
+  3x  Current shunt CS-05, 5 milliohm, 0.1 percent
+  1x  Isolation transformer IT-1K, 1 kVA
+
+Bench 3 (digital)
+  1x  Mixed-signal oscilloscope MSO-6204, 4 analogue plus 16 digital channels
+  1x  Logic analyser LA-3416, 34 channels, serial DG-00551
+  2x  Bench multimeter DMM-6500, 6.5 digit
+  1x  Soldering station SS-90, hot air and iron
+
+Consumables held centrally, not per bench
+  Kapton tape, 25 mm — reorder below 4 rolls
+  Isopropyl alcohol, 1 L — reorder below 2 bottles
+  Solder wire, SAC305, 0.5 mm — reorder below 3 reels
+
+Calibration
+  Anything with a serial number is calibrated annually. The spectrum analyser
+  RF-00417 and the logic analyser DG-00551 are both due in the same month, which
+  is deliberate: the bench is unusable during either calibration, so they are
+  scheduled together rather than spread out.
+
+  The noise figure meter NF-88 is not calibrated by us. It returns to Delft with
+  its own certificate and must not be sent to our calibration vendor.

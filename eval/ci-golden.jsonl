@@ -1,0 +1,41 @@
+// CI golden set — scored against eval/fixtures/, which is committed.
+//
+// Separate from eval/golden.jsonl on purpose. That set references chunk ids
+// from documents under corpus/, which is gitignored so nobody publishes their
+// own documents by accident — which also means CI can never resolve those ids.
+// This set references a fictional corpus that is safe to publish, so the gate
+// can actually run on a fresh checkout.
+//
+// Kept deliberately cheap. Only the three `generation` items call the model;
+// everything else stops after reranking, and the two negatives are refused by
+// the confidence gate before any model call happens. Regenerate the ids with
+// `./ask-my-docs chunks -dir eval/fixtures` after touching the fixtures.
+
+// --- sparse leg: exact identifiers, which pure vector search gets wrong ---
+{"id":"ci-code-4412","query":"ORB-4412","relevant_chunk_ids":["error-codes.csv#0"],"stage":"retrieval"}
+{"id":"ci-code-6203","query":"What does error ORB-6203 mean?","relevant_chunk_ids":["error-codes.csv#1"],"stage":"retrieval"}
+{"id":"ci-serial-rf417","query":"RF-00417","relevant_chunk_ids":["lab-inventory.txt#0"],"stage":"retrieval"}
+
+// --- dense leg: paraphrases sharing almost no vocabulary with the source ---
+{"id":"ci-travel-ceiling","query":"How much can I spend on a trip before somebody has to sign it off?","relevant_chunk_ids":["orbital-handbook.md#1"],"stage":"retrieval"}
+{"id":"ci-pager-escalation","query":"If nobody picks up an alert, who gets told next?","relevant_chunk_ids":["orbital-handbook.md#2"],"stage":"retrieval"}
+{"id":"ci-weekend-release","query":"Am I allowed to ship to production on a Saturday?","relevant_chunk_ids":["orbital-handbook.md#3"],"stage":"retrieval"}
+{"id":"ci-access-expiry","query":"Does permission to read customer data last forever?","relevant_chunk_ids":["orbital-handbook.md#4"],"stage":"retrieval"}
+{"id":"ci-cursor-replay","query":"What happens when a client retries a page request that timed out?","relevant_chunk_ids":["api-notes.md#2"],"stage":"retrieval"}
+{"id":"ci-second-token","query":"Does issuing another credential give me more throughput?","relevant_chunk_ids":["api-notes.md#4"],"stage":"retrieval"}
+{"id":"ci-drain-order","query":"Should I stop serving from a region before or after moving its traffic away?","relevant_chunk_ids":["runbooks.md#9"],"stage":"retrieval"}
+
+// --- rerank discriminators: several chunks are on-topic, one answers ---
+{"id":"ci-key-rotation-wait","query":"How long does the previous signing key have to keep working after a rotation?","relevant_chunk_ids":["runbooks.md#2","error-codes.csv#0"],"stage":"rerank"}
+{"id":"ci-shard-failover","query":"When should a degraded storage shard be failed over rather than left to recover?","relevant_chunk_ids":["runbooks.md#3"],"stage":"rerank"}
+{"id":"ci-cardinality-order","query":"Do I drop the label before or after re-enabling the metrics exporter?","relevant_chunk_ids":["runbooks.md#5"],"stage":"rerank"}
+{"id":"ci-restore-in-place","query":"Is an index snapshot restored over the top of the existing index?","relevant_chunk_ids":["runbooks.md#6"],"stage":"rerank"}
+
+// --- generation: the only items that call the model ---
+{"id":"ci-gen-oncall-handover","query":"When does the on-call rotation hand over, and why at that time?","relevant_chunk_ids":["orbital-handbook.md#2"],"gold_answer":"It hands over weekly at 10:00 on Wednesdays, chosen so that a handover never lands on a Monday morning alongside the weekly planning meeting.","stage":"generation"}
+{"id":"ci-gen-deploy-approvals","query":"How many approvals does a production deployment need, and who gives them?","relevant_chunk_ids":["orbital-handbook.md#3"],"gold_answer":"Two approvals: one from a reviewer who read the diff and one from whoever is currently on call. They cannot be the same person, because the on-call approval is about capacity to respond rather than code quality.","stage":"generation"}
+{"id":"ci-gen-idempotency-status","query":"What status code does a replayed idempotent create return?","relevant_chunk_ids":["api-notes.md#3"],"gold_answer":"It returns the original response including its original status code, so a replayed create returns 201 rather than 200. Keys are retained for 24 hours.","stage":"generation"}
+
+// --- negative rejection: the corpus does not cover these, and must say so ---
+{"id":"ci-neg-vacation","query":"How many days of paid holiday do employees get each year?","relevant_chunk_ids":[],"stage":"generation"}
+{"id":"ci-neg-founder","query":"Who founded Orbital Dynamics and in what year?","relevant_chunk_ids":[],"stage":"generation"}

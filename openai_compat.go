@@ -216,6 +216,7 @@ func (o *OpenAICompat) post(ctx context.Context, body []byte) ([]byte, int, erro
 	var raw []byte
 	var status int
 	var slept time.Duration // total time spent backing off, across attempts
+	var transport error     // last transport failure, if the attempts ran out on one
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.BaseURL+"/chat/completions", bytes.NewReader(body))
@@ -225,26 +226,44 @@ func (o *OpenAICompat) post(ctx context.Context, body []byte) ([]byte, int, erro
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+o.APIKey)
 
+		var retryAfter string
 		started := time.Now()
 		resp, err := o.HTTP.Do(req)
-		if err != nil {
-			if debugLLM {
-				log.Printf("[llm] attempt %d transport error after %s: %v", attempt, time.Since(started).Round(time.Millisecond), err)
+		switch {
+		case err != nil:
+			// A connection reset or an unexpected EOF is transient in exactly
+			// the way a 502 is, and the backoff below already exists for that.
+			// Returning here instead meant one dropped connection failed a
+			// whole answer — and in eval, silently dropped that item from the
+			// metrics rather than failing the run, so the measurement quietly
+			// got smaller. Measured against NVIDIA NIM at roughly one item in
+			// twenty.
+			//
+			// A dead context is the exception: it is not transient, and
+			// retrying it spends the remaining budget failing the same way.
+			if ctx.Err() != nil {
+				return nil, 0, fmt.Errorf("%s: %w", o.BaseURL, err)
 			}
-			return nil, 0, fmt.Errorf("%s: %w", o.BaseURL, err)
-		}
-		raw, _ = io.ReadAll(resp.Body)
-		status = resp.StatusCode
-		retryAfter := resp.Header.Get("retry-after")
-		resp.Body.Close()
-		if debugLLM {
-			log.Printf("[llm] attempt %d: status=%d reqBytes=%d respBytes=%d in %s",
-				attempt, status, len(body), len(raw), time.Since(started).Round(time.Millisecond))
+			transport = err
+			if debugLLM {
+				log.Printf("[llm] attempt %d transport error after %s: %v",
+					attempt, time.Since(started).Round(time.Millisecond), err)
+			}
+		default:
+			transport = nil
+			raw, _ = io.ReadAll(resp.Body)
+			status = resp.StatusCode
+			retryAfter = resp.Header.Get("retry-after")
+			resp.Body.Close()
+			if debugLLM {
+				log.Printf("[llm] attempt %d: status=%d reqBytes=%d respBytes=%d in %s",
+					attempt, status, len(body), len(raw), time.Since(started).Round(time.Millisecond))
+			}
+			if status != http.StatusTooManyRequests && status < 500 {
+				return raw, status, nil
+			}
 		}
 
-		if status != http.StatusTooManyRequests && status < 500 {
-			return raw, status, nil
-		}
 		if attempt == maxAttempts-1 {
 			break
 		}
@@ -266,6 +285,11 @@ func (o *OpenAICompat) post(ctx context.Context, body []byte) ([]byte, int, erro
 			if debugLLM {
 				log.Printf("[llm] backoff budget spent (%s + %s > %s cap); failing fast", slept, wait, o.MaxBackoff)
 			}
+			if transport != nil {
+				// There is no response to hand back on this path, and a nil
+				// error beside a zero status would read as a successful call.
+				return nil, 0, fmt.Errorf("%s: %w", o.BaseURL, transport)
+			}
 			return raw, status, nil
 		}
 		slept += wait
@@ -277,6 +301,9 @@ func (o *OpenAICompat) post(ctx context.Context, body []byte) ([]byte, int, erro
 			return nil, 0, ctx.Err()
 		case <-time.After(wait):
 		}
+	}
+	if transport != nil {
+		return nil, 0, fmt.Errorf("%s: %w (after %d attempts)", o.BaseURL, transport, maxAttempts)
 	}
 	return raw, status, nil
 }
