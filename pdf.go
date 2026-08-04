@@ -2,9 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ledongthuc/pdf"
 )
@@ -26,7 +30,15 @@ import (
 // Page sections rather than one blob because the chunker splits on headings: a
 // citation to a 60-page report is only useful if it narrows to a page, and page
 // boundaries are the only structure a PDF reliably has.
+// pdfExtractor selects the reader. Read once at startup like debugLLM, because
+// LoadDocumentText is called from the CLI, the upload handler and the tests,
+// and threading one string through all of them buys nothing.
+var pdfExtractor = strings.ToLower(strings.TrimSpace(os.Getenv("PDF_EXTRACTOR")))
+
 func extractPDF(data []byte) (out string, err error) {
+	if pdfExtractor == "pdftotext" {
+		return extractPDFExternal(data)
+	}
 	// The parser panics on malformed xref tables and broken object streams
 	// rather than returning an error. A corrupt upload must not take down the
 	// ingest run or the server.
@@ -79,12 +91,70 @@ func extractPDF(data []byte) (out string, err error) {
 	// retrieved by luck and quoted into an answer.
 	if unsegmented(text) {
 		return "", fmt.Errorf("text extracted but word boundaries were lost — " +
-			"this PDF reports no glyph widths, so spaces cannot be recovered " +
-			"(common in LaTeX-produced files). Re-save it from a viewer that " +
-			"re-encodes fonts, or run it through OCR; indexing it as-is would " +
-			"make it unsearchable")
+			"the built-in reader could not read this PDF's glyph widths, so it " +
+			"had no gaps to infer spaces from (common with LaTeX-produced files). " +
+			"The text layer is probably fine: set PDF_EXTRACTOR=pdftotext to use " +
+			"poppler instead, which reads these correctly. Indexing it as-is " +
+			"would make the document unsearchable")
 	}
 	return text, nil
+}
+
+// extractPDFExternal shells out to poppler's pdftotext.
+//
+// The built-in reader is pure Go and keeps this a single static binary, which
+// is worth a lot — but it fails on a whole class of real documents. A LaTeX
+// book measured here came back with every run reporting zero width, so no
+// space could be inferred anywhere and a 352-page book extracted as one token
+// per page: "different" appeared 0 times in it. pdftotext read the same file
+// correctly, 121 times, and it also rejoins words hyphenated across a line
+// break, which the built-in path does not.
+//
+// Opt-in rather than automatic, even though auto-detection would be friendlier.
+// Chunk ids are the eval contract, and an extractor chosen by what happens to
+// be installed would give two machines different ids for the same document.
+func extractPDFExternal(data []byte) (string, error) {
+	exe, err := exec.LookPath("pdftotext")
+	if err != nil {
+		return "", fmt.Errorf("PDF_EXTRACTOR=pdftotext but pdftotext is not on PATH (install poppler-utils)")
+	}
+	f, err := os.CreateTemp("", "askmydocs-*.pdf")
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		return "", err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, exe, "-q", f.Name(), "-")
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("pdftotext: %w: %s", err, truncate(stderr.String(), 200))
+	}
+
+	// pdftotext separates pages with a form feed, which is the only page
+	// structure it gives — and page sections are what let a citation narrow to
+	// a page rather than to a 350-page book.
+	var blocks []string
+	for i, page := range strings.Split(string(out), "\f") {
+		if page = strings.TrimSpace(page); page == "" {
+			continue
+		}
+		blocks = append(blocks, fmt.Sprintf("## Page %d", i+1), page)
+	}
+	if len(blocks) == 0 {
+		return "", fmt.Errorf("no extractable text — likely a scanned or image-only PDF, which needs OCR")
+	}
+	return joinBlocks(blocks), nil
 }
 
 // unsegmented reports whether extracted text has lost its word boundaries.

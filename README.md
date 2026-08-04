@@ -570,7 +570,27 @@ they will not be retrievable.
 
 ### PDF
 
-Text and page structure extract well; charts do not, and cannot.
+Text and page structure extract well *when the producer cooperates*; charts do
+not, and cannot.
+
+> [!WARNING]
+> **The built-in reader loses word boundaries on some PDFs.** It infers a space
+> from the gap between two positioned text runs — the only evidence a PDF
+> offers — so a producer that reports no glyph widths leaves nothing to
+> measure. Measured on a LaTeX-produced textbook: every page came back as one
+> run-together token (`46CHAPTER2.MULTI-ARMBANDITSUsingthis,wecanwrite`), and
+> the word "different" appeared **0 times in 352 pages**.
+>
+> Ingest **refuses** such a document rather than indexing it, because the
+> sparse leg would turn each page into one token matching no query and the
+> dense leg would embed subword noise — leaving a document that is silently
+> unfindable yet still quotable by luck.
+>
+> `PDF_EXTRACTOR=pdftotext` uses poppler instead, which reads those files
+> correctly (same book: "different" 121 times) and also rejoins words
+> hyphenated across a line break. Opt-in, not automatic — chunk ids are the
+> eval contract, and an extractor chosen by what happens to be installed would
+> give two machines different ids for the same file.
 
 **A PDF has no chart data.** The Office trick above works because OOXML caches
 the plotted numbers inside the file. A PDF chart is drawing operations or a
