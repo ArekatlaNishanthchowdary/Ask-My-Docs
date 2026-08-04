@@ -17,8 +17,13 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// debugLLM logs each upstream call when DEBUG_LLM=1.
-var debugLLM = os.Getenv("DEBUG_LLM") != ""
+// debugLLM reports whether to log each upstream call.
+//
+// A function rather than a package var: package-level initialisation runs
+// before main, and .env is loaded inside main, so a var here would see only
+// real environment variables — DEBUG_LLM=1 written into .env, exactly as
+// .env.example documents, would do nothing.
+func debugLLM() bool { return os.Getenv("DEBUG_LLM") != "" }
 
 // OpenAICompat drives any OpenAI-compatible chat-completions endpoint: Groq,
 // OpenRouter, Together, Fireworks, or a self-hosted vLLM / LM Studio. One
@@ -89,12 +94,12 @@ func (o *OpenAICompat) chat(ctx context.Context, model, system, user string, sch
 	if err != nil {
 		return err
 	}
-	if debugLLM {
+	if debugLLM() {
 		log.Printf("[llm] REQ %s", truncate(string(body), 1200))
 	}
 	started := time.Now()
 	raw, status, err := o.post(ctx, body)
-	if debugLLM {
+	if debugLLM() {
 		log.Printf("[llm] model=%s fallback=%v status=%d in %s", model, fallback, status, time.Since(started).Round(time.Millisecond))
 	}
 	if err != nil {
@@ -144,7 +149,7 @@ func (o *OpenAICompat) chat(ctx context.Context, model, system, user string, sch
 	content := strings.TrimSpace(res.Choices[0].Message.Content)
 	// A response that parses into the right shape but the wrong contents (an
 	// empty array where verdicts were expected) is invisible from the error.
-	if debugLLM {
+	if debugLLM() {
 		log.Printf("DEBUG_LLM %s -> %s", model, truncate(content, 400))
 	}
 	if content == "" {
@@ -245,7 +250,7 @@ func (o *OpenAICompat) post(ctx context.Context, body []byte) ([]byte, int, erro
 				return nil, 0, fmt.Errorf("%s: %w", o.BaseURL, err)
 			}
 			transport = err
-			if debugLLM {
+			if debugLLM() {
 				log.Printf("[llm] attempt %d transport error after %s: %v",
 					attempt, time.Since(started).Round(time.Millisecond), err)
 			}
@@ -255,7 +260,7 @@ func (o *OpenAICompat) post(ctx context.Context, body []byte) ([]byte, int, erro
 			status = resp.StatusCode
 			retryAfter = resp.Header.Get("retry-after")
 			resp.Body.Close()
-			if debugLLM {
+			if debugLLM() {
 				log.Printf("[llm] attempt %d: status=%d reqBytes=%d respBytes=%d in %s",
 					attempt, status, len(body), len(raw), time.Since(started).Round(time.Millisecond))
 			}
@@ -282,7 +287,7 @@ func (o *OpenAICompat) post(ctx context.Context, body []byte) ([]byte, int, erro
 		// per-sleep it bounded nothing useful: four retries just under a 45s cap
 		// legally sat for ~180s, which is how a p50 of 21s grew a p95 of 162s.
 		if slept+wait > o.MaxBackoff {
-			if debugLLM {
+			if debugLLM() {
 				log.Printf("[llm] backoff budget spent (%s + %s > %s cap); failing fast", slept, wait, o.MaxBackoff)
 			}
 			if transport != nil {
@@ -293,7 +298,7 @@ func (o *OpenAICompat) post(ctx context.Context, body []byte) ([]byte, int, erro
 			return raw, status, nil
 		}
 		slept += wait
-		if debugLLM {
+		if debugLLM() {
 			log.Printf("[llm] backing off %s (retry-after=%q)", wait, retryAfter)
 		}
 		select {

@@ -25,19 +25,27 @@ import (
 // table. A PDF chart is drawing operations or a raster image — its title, axis
 // labels and legend are extractable text, its values are lines. See README.
 
+// pdfExtractor selects the reader: empty (or "builtin") uses the pure-Go one,
+// anything else names a pdftotext-compatible binary — a bare name resolved on
+// PATH, or an absolute path for when it is installed somewhere PATH does not
+// reach. On Windows that is the common case rather than the exception: poppler
+// ships inside Git's MSYS tree, which Git Bash puts on PATH and every other
+// shell does not.
+//
+// Read per call, not into a package var. Package-level initialisation runs
+// before main, and .env is loaded inside main — so a var would see only real
+// environment variables and would silently ignore the .env line that
+// .env.example tells you to write.
+func pdfExtractor() string { return strings.TrimSpace(os.Getenv("PDF_EXTRACTOR")) }
+
 // extractPDF emits one `## Page N` section per page.
 //
 // Page sections rather than one blob because the chunker splits on headings: a
 // citation to a 60-page report is only useful if it narrows to a page, and page
 // boundaries are the only structure a PDF reliably has.
-// pdfExtractor selects the reader. Read once at startup like debugLLM, because
-// LoadDocumentText is called from the CLI, the upload handler and the tests,
-// and threading one string through all of them buys nothing.
-var pdfExtractor = strings.ToLower(strings.TrimSpace(os.Getenv("PDF_EXTRACTOR")))
-
 func extractPDF(data []byte) (out string, err error) {
-	if pdfExtractor == "pdftotext" {
-		return extractPDFExternal(data)
+	if e := pdfExtractor(); e != "" && !strings.EqualFold(e, "builtin") {
+		return extractPDFExternal(e, data)
 	}
 	// The parser panics on malformed xref tables and broken object streams
 	// rather than returning an error. A corrupt upload must not take down the
@@ -113,10 +121,11 @@ func extractPDF(data []byte) (out string, err error) {
 // Opt-in rather than automatic, even though auto-detection would be friendlier.
 // Chunk ids are the eval contract, and an extractor chosen by what happens to
 // be installed would give two machines different ids for the same document.
-func extractPDFExternal(data []byte) (string, error) {
-	exe, err := exec.LookPath("pdftotext")
+func extractPDFExternal(bin string, data []byte) (string, error) {
+	exe, err := exec.LookPath(bin)
 	if err != nil {
-		return "", fmt.Errorf("PDF_EXTRACTOR=pdftotext but pdftotext is not on PATH (install poppler-utils)")
+		return "", fmt.Errorf("PDF_EXTRACTOR=%s: not found (%w) — install poppler-utils, "+
+			"or give the full path to the executable", bin, err)
 	}
 	f, err := os.CreateTemp("", "askmydocs-*.pdf")
 	if err != nil {

@@ -586,7 +586,10 @@ not, and cannot.
 > dense leg would embed subword noise — leaving a document that is silently
 > unfindable yet still quotable by luck.
 >
-> `PDF_EXTRACTOR=pdftotext` uses poppler instead, which reads those files
+> `PDF_EXTRACTOR` takes a binary name resolved on `PATH`, or a full path to it
+> — on Windows the full path is usually required, because Git ships poppler
+> inside MSYS where only Git Bash can see it
+> (`C:\Program Files\Git\mingw64\bin\pdftotext.exe`). It uses poppler, which reads those files
 > correctly (same book: "different" 121 times) and also rejoins words
 > hyphenated across a line break. Opt-in, not automatic — chunk ids are the
 > eval contract, and an extractor chosen by what happens to be installed would
