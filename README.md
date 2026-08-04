@@ -1,28 +1,85 @@
-# Ask My Docs
+<h1 align="center">Ask My Docs</h1>
 
-**Hybrid-retrieval RAG that refuses rather than guesses.** A single Go binary —
-no Python, no orchestration framework — that indexes your documents and answers
-questions from them with every claim tied to the chunk it came from.
+<p align="center">
+  <b>Hybrid-retrieval RAG that refuses rather than guesses.</b><br>
+  A single Go binary — no Python, no orchestration framework — that indexes your
+  documents and answers questions from them<br>with every claim tied to the chunk
+  it came from.
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Go 1.25+](https://img.shields.io/badge/Go-1.25%2B-00ADD8.svg)
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue.svg"></a>
+  <img alt="Go 1.25+" src="https://img.shields.io/badge/Go-1.25%2B-00ADD8.svg">
+  <img alt="Direct dependencies: 3" src="https://img.shields.io/badge/direct%20deps-3-brightgreen.svg">
+  <img alt="Runs offline" src="https://img.shields.io/badge/runs-fully%20offline-success.svg">
+  <img alt="Auth: bearer tokens" src="https://img.shields.io/badge/auth-bearer%20%2B%20ACL-informational.svg">
+</p>
+
+---
 
 Runs **fully local** (Qdrant + Ollama, no API keys, nothing leaves the machine),
-fully hosted, or any mix — the embedding, reranking and generation stages are
-independent knobs.
+fully hosted, or any mix — embedding, reranking and generation are independent
+knobs.
 
+```mermaid
+flowchart LR
+  subgraph I ["INGEST"]
+    direction TB
+    D[document] --> C[structure-aware<br/>chunks]
+    C --> X[contextual<br/>preamble]
+    X --> E[dense + sparse<br/>embeddings]
+    E --> Q[(Qdrant)]
+  end
+  subgraph R ["QUERY"]
+    direction TB
+    QQ[question] --> CA{semantic<br/>cache}
+    CA -->|hit| OUT
+    CA -->|miss| HY[dense ANN + sparse BM25<br/>server-side RRF fusion]
+    HY --> RR[cross-encoder<br/>rerank]
+    RR --> G{confidence<br/>gate}
+    G -->|below threshold| REF[refuse<br/>no model call]
+    G -->|above| GEN[cited generation]
+    GEN --> V1{citation<br/>validation}
+    V1 --> V2{entailment<br/>check}
+    V2 --> OUT[answer + citations]
+  end
+  Q -.-> HY
 ```
-┌─ ingest ────────────────────────────────────────────────────────────┐
-│  document → structure-aware chunks → LLM contextual preamble        │
-│           → dense + sparse embeddings → Qdrant                      │
-└─────────────────────────────────────────────────────────────────────┘
-┌─ query ─────────────────────────────────────────────────────────────┐
-│  semantic cache → query embed → dense ANN + sparse BM25             │
-│                 → RRF fusion (server-side) → cross-encoder rerank   │
-│                 → confidence gate → cited generation                │
-│                 → citation validation → entailment check            │
-└─────────────────────────────────────────────────────────────────────┘
-```
+
+<table>
+<tr><td width="33%" valign="top">
+
+**🛡️ Refuses by design**
+
+Three independent guards. The failure mode is a refusal, never an unsupported
+claim.
+
+</td><td width="33%" valign="top">
+
+**📏 Measured, not asserted**
+
+Every stage can be switched off, so "better than plain RAG" is a number from
+*your* corpus.
+
+</td><td width="33%" valign="top">
+
+**🔒 Server-enforced ACLs**
+
+Permission tags come from the caller's token. The request body cannot ask for
+more.
+
+</td></tr>
+</table>
+
+## Contents
+
+| | |
+|---|---|
+| **Getting started** | [Why this exists](#why-this-exists) · [What's measured](#whats-measured) · [Requirements](#requirements) · [Install](#install) · [Quick start](#quick-start) |
+| **Running it** | [Choosing backends](#choosing-backends) · [Commands](#commands) · [HTTP API](#http-api) · [Authentication](#authentication) · [Web UI](#web-ui) |
+| **Your documents** | [Document formats](#document-formats) · [Tables](#tables) · [Charts](#charts) · [PDF](#pdf) |
+| **Keeping it honest** | [Configuration](#configuration) · [Evaluation and CI gating](#evaluation-and-ci-gating) · [Proving it beats plain RAG](#proving-it-beats-plain-rag) |
+| **Internals** | [Design notes](#design-notes) · [Tests](#tests) · [Project layout](#project-layout) · [Troubleshooting](#troubleshooting) · [Not built](#not-built) |
 
 ## Why this exists
 
@@ -47,11 +104,43 @@ Citations are enforced through **structured outputs** (strict `json_schema`,
 downgrading once to `json_object` if the endpoint rejects it), not through
 prompt begging.
 
+## What's measured
+
+The headline claim of any RAG system is that its extra stages earn their keep.
+Here that is a number you can reproduce, not a diagram. From the bundled
+33-item golden set (8 documents, 300 chunks):
+
+| | Retrieval alone | + cross-encoder rerank | Δ |
+|---|---:|---:|:--|
+| **nDCG@10** | 0.740 | **0.905** | `+0.164` ✅ |
+| Recall@10 | — | 0.95 | |
+| MRR | — | 0.90 | |
+| Citation precision / recall | — | 0.725 / 0.78 | |
+
+> [!NOTE]
+> **One item is worth 0.030** on a 33-item set, so that is the noise floor.
+> The reranking lift is 5× it and real. A 0.02 difference between two runs is
+> not — the harness prints its own floor and renders anything under it as `~0`.
+
+Honest caveats, because a benchmark table without them is marketing:
+
+- **Answer correctness is not in that table** — the run had the LLM judge off.
+  A model grading its own answers measured **0.15–0.19 too generous**, so the
+  number only means something under a `JUDGE_PROVIDER` that had no hand in
+  writing them.
+- **Citation precision is a floor, not a ceiling.** It counts a citation as
+  wrong when it is outside the golden set, and the golden set names fewer
+  chunks than actually support each answer.
+- **300 chunks cannot settle this.** At that size `recall_at_10` is arithmetic,
+  not quality, and the harness says so out loud. See
+  [Proving it beats plain RAG](#proving-it-beats-plain-rag) for the ablation
+  ladder that makes the comparison properly.
+
 ## Requirements
 
 | | Needed for | Notes |
 |---|---|---|
-| **Go 1.25+** | building | Two Go modules: `golang.org/x/sync` and a PDF reader. |
+| **Go 1.25+** | building | Three direct modules: `golang.org/x/sync`, a PDF reader, and the Anthropic SDK. Everything else is standard library. |
 | **Docker** | Qdrant + reranker | `docker compose up -d` starts both. |
 | **Ollama** | the fully-local path | Optional if you use hosted providers for everything except reranking. |
 | **~2GB VRAM or CPU** | the reranker | `bge-reranker-v2-m3` behind TEI. A CPU image is the default. |
@@ -113,6 +202,7 @@ OLLAMA_EMBED_MODEL=bge-m3
 OLLAMA_CHAT_MODEL=qwen2.5:7b
 ```
 
+> [!IMPORTANT]
 > The embedding model must actually support embeddings — a chat model returns
 > `501` from Ollama. **Generation model size matters more than anything else
 > here:** a 7B refused questions its own sources answered until several fixes
@@ -142,6 +232,11 @@ Reranker: 89-1.7
 Compose:  docker-compose.yml + docker-compose.gpu.yml
 ```
 
+<details>
+<summary><b>Compute capability → TEI image, if you'd rather set it by hand</b></summary>
+
+<br>
+
 | Compute | `TEI_IMAGE` | GPUs |
 |---|---|---|
 | 9.0 | `hopper-1.7` | H100, H200 |
@@ -150,6 +245,8 @@ Compose:  docker-compose.yml + docker-compose.gpu.yml
 | 8.0 | `1.7` | A100, A30 |
 | 7.5 | `turing-1.7` | RTX 20xx, T4 |
 | anything else | `cpu-1.7` | including Blackwell — newer than any TEI 1.7 tag |
+
+</details>
 
 Two failure modes `detect` exists to prevent. A mismatched tag fails at startup
 with *"Runtime compute cap N is not compatible"* — loud, but only after you've
@@ -179,9 +276,11 @@ indexing — this needs no services and no keys:
 ALLOW_ANONYMOUS=1 ./ask-my-docs serve  # UI + API on http://localhost:8080
 ```
 
-`serve` will not start without an authentication decision. `ALLOW_ANONYMOUS=1`
-is the local-demo answer and means what it says: anyone who can reach the port
-reads every indexed document. See [Authentication](#authentication) for tokens.
+> [!WARNING]
+> `serve` will not start without an authentication decision. `ALLOW_ANONYMOUS=1`
+> is the local-demo answer and means what it says: **anyone who can reach the
+> port reads every indexed document, uploads more, and switches models.** See
+> [Authentication](#authentication) for tokens.
 
 Ingest is idempotent — re-running overwrites in place.
 
@@ -296,10 +395,11 @@ JUDGE_PROVIDER=openai OPENAI_JUDGE_MODEL=openai/gpt-oss-120b \
 OPENAI_API_KEY=... ./ask-my-docs eval -verbose
 ```
 
-⚠️ **Comparing two generators is only meaningful under one shared judge.** Left
-unset, each model grades its own answers — which measured **0.15–0.19 too
-generous**. Treat any correctness figure produced by the model that wrote the
-answers as an upper bound, not a measurement.
+> [!WARNING]
+> **Comparing two generators is only meaningful under one shared judge.** Left
+> unset, each model grades its own answers — which measured **0.15–0.19 too
+> generous**. Treat any correctness figure produced by the model that wrote the
+> answers as an upper bound, not a measurement.
 
 ## Commands
 
@@ -345,11 +445,24 @@ AUTH_TOKENS_FILE=tokens.json ask-my-docs serve
 curl -H "Authorization: Bearer $TOKEN" -d '{"question":"…"}' localhost:8080/query
 ```
 
-**The ACL tags come from the token, and the request body's `acl` field is
-discarded — not merged.** That substitution is the whole reason this exists.
-Before it, retrieval was filtered by tags the *caller* supplied, so anyone who
-knew a tag existed could ask for it and be given the documents. That is not
-access control; it is a filter the client picks.
+> [!IMPORTANT]
+> **The ACL tags come from the token, and the request body's `acl` field is
+> discarded — not merged.** That substitution is the whole reason this exists.
+> Before it, retrieval was filtered by tags the *caller* supplied, so anyone
+> who knew a tag existed could ask for it and be given the documents. That is
+> not access control; it is a filter the client picks.
+
+The same request, twice, differing only in the token:
+
+```jsonc
+POST /query   {"question": "What CGPA is listed on the resume?",
+               "acl": ["*", "public", "hr-confidential"]}   // ← ignored
+```
+
+| Token grants | Sources returned | Result |
+|---|:--:|---|
+| `["public"]` | **0** | refused — no chunk carries that tag |
+| `["*"]` | **5** | answered, with citations |
 
 Consequences worth knowing:
 
@@ -446,7 +559,9 @@ Charts are appended as their own `## Charts` section rather than placed inline:
 the drawing-to-chart relationship chain differs per format, and a chart under
 the wrong heading is worse than one under an honest heading.
 
-⚠️ **A chart pasted in as a picture is pixels, and this does not read it.**
+> [!WARNING]
+> **A chart pasted in as a picture is pixels, and this does not read it.**
+
 Neither are scanned pages, photographed tables, or diagrams and flowcharts —
 those carry their meaning in layout, not in any cached series. Reading them
 needs a vision model over rendered pages, which is the deliberately deferred
@@ -535,9 +650,15 @@ than just observed: exact-identifier lookups (the sparse leg), zero-overlap
 paraphrases (the dense leg), a reranking discriminator, and a
 negative-rejection case.
 
-Metrics: Recall@10, nDCG@10, MRR, reranker nDCG lift over retrieval alone,
-citation precision/recall, LLM-judged answer correctness, and p50/p95/p99
-latency per stage.
+| Metric | What it tells you | Gated in CI |
+|---|---|:--:|
+| `recall_at_10`, `ndcg_at_10`, `mrr` | Did the right chunk come back, and how high | ✅ |
+| `retrieval_ndcg_at_10`, `rerank_lift` | What the cross-encoder is worth over retrieval alone | |
+| `citation_precision`, `citation_recall` | Did the answer cite what it should have | ✅ |
+| `answer_correctness` | LLM judge against a gold answer | ✅ |
+| `retrieve_p95_ms`, `rerank_p95_ms` | The two stages this repo controls | ✅ |
+| `generate_p95_ms`, `verify_p95_ms` | The two hosted stages — reported, never gated | |
+| `latency_p50/p95/p99_ms` | End to end, under the same budget `/query` enforces | |
 
 `.github/workflows/eval.yml` runs this against a real Qdrant on every PR and
 uploads `metrics.json` so runs are diffable. The gate uses **separate quality
@@ -591,8 +712,8 @@ an ablation is worse than a crash, because it produces a table that looks real.
 
 Two honest limits:
 
-- **Deltas smaller than `1/N` are noise.** With 37 items scoring 0, 0.5 or 1.0,
-  one item flipping moves a mean by 0.027. `ablate` prints its own noise floor
+- **Deltas smaller than `1/N` are noise.** With 33 items scoring 0, 0.5 or 1.0,
+  one item flipping moves a mean by 0.030. `ablate` prints its own noise floor
   and renders anything under it as `~0`.
 - **Contextualization is not in the table.** It is baked into the vectors at
   ingest time, so its three rungs — no context, derived context, LLM context —
@@ -603,7 +724,10 @@ A corpus of a few hundred chunks cannot settle the question either way: at that
 size `recall_at_10` is arithmetic, not quality. The claim only becomes
 defensible on a real benchmark with enough items that `1/N` is small.
 
-### Reference measurements
+<details>
+<summary><b>Reference measurements — the evidence behind three design decisions</b></summary>
+
+<br>
 
 Measured during development on a 15-item eval set over a small sample corpus
 **not included here**. Kept because it is the evidence behind several design
@@ -635,7 +759,7 @@ Three fixes produced that, in order of impact:
    verifier's. Asking a 7B to also judge sufficiency just produced refusals on
    questions its own sources answered.
 
-### Local 7B vs hosted 70B
+#### Local 7B vs hosted 70B
 
 Same retrieval, same cross-encoder, same threshold, same independent judge:
 
@@ -655,6 +779,8 @@ between two runs is not.
 **Recall@10 of 1.00 means nothing on a tiny corpus.** If the corpus has ≤
 `TOP_K` chunks, "the top 10 contains the answer" is arithmetic, not quality.
 The harness warns when this holds.
+
+</details>
 
 ## Design notes
 
@@ -738,19 +864,31 @@ vectors, RRF fusion and ACL filtering using synthetic vectors — no API keys.
 ## Project layout
 
 ```
-main.go            config, wiring, HTTP server, CLI
-query.go           the query pipeline and its three guards
-ingest.go          chunking, contextualization, indexing
-qdrant.go          collections, hybrid search, RRF
-office.go          docx/pptx/xlsx extraction (stdlib only)
-rerank_tei.go      cross-encoder client
-ollama.go          local provider
-openai_compat.go   any OpenAI-compatible endpoint
-embed_compat.go    OpenAI-compatible embeddings
-claude.go          Anthropic provider
-providers.go       Voyage, tokenizer, shared types
-eval.go            metrics, golden set, CI gate
-ui.html            the entire frontend
+├─ pipeline
+│  query.go           the query pipeline and its three guards
+│  ingest.go          chunking, contextualization, indexing
+│  qdrant.go          collections, hybrid search, RRF
+│  rerank_tei.go      cross-encoder client
+├─ extraction
+│  office.go          docx/pptx/xlsx extraction (stdlib only)
+│  charts.go          OOXML plotted-series cache → markdown tables
+│  tabular.go         csv/tsv → markdown tables
+│  pdf.go             page text, reading order, line grouping
+├─ providers
+│  ollama.go          local provider
+│  openai_compat.go   any OpenAI-compatible endpoint
+│  embed_compat.go    OpenAI-compatible embeddings
+│  claude.go          Anthropic provider
+│  providers.go       Voyage, tokenizer, shared types
+├─ measurement
+│  eval.go            metrics, golden set, CI gate
+│  ablate.go          the stage-by-stage ladder
+├─ boundary
+│  auth.go            principals, bearer tokens, the ACL substitution
+├─ plumbing
+│  main.go            config, wiring, HTTP server, CLI
+│  detect.go          GPU → TEI image selection
+│  ui.html            the entire frontend
 ```
 
 ## Troubleshooting
@@ -765,10 +903,15 @@ ui.html            the entire frontend
 | `response truncated at max_tokens` | Reasoning model. Raise `OPENAI_MAX_TOKENS`, or lower `OPENAI_CONTEXT_BATCH` for ingest. |
 | Everything refuses | Gate too high for your corpus. Run `calibrate`. |
 | Answers ignore new documents | Semantic cache. Ingest clears it; `no_cache: true` bypasses it. |
+| `refusing to serve without authentication` | By design. Set `AUTH_TOKENS_FILE`, or `ALLOW_ANONYMOUS=1` for a local demo. |
+| `401` on every request | No `Authorization: Bearer …` header, or the token is not in the principal file. |
+| `403` on upload or model switch | That token is not `"admin": true`. |
+| A caller sees no documents at all | Their token's tags match no chunk. Chunks are tagged at ingest with `-acl`; untagged chunks are only visible to `["*"]`. |
 
-Set `DEBUG_LLM=1` to log every upstream request and response — a response that
-parses into the right *shape* but the wrong *contents* is invisible from the
-error alone, and that is how most bugs here were found.
+> [!TIP]
+> Set `DEBUG_LLM=1` to log every upstream request and response — a response
+> that parses into the right *shape* but the wrong *contents* is invisible from
+> the error alone, and that is how most bugs here were found.
 
 ## Contributing
 
