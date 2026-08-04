@@ -64,7 +64,58 @@ func extractPDF(data []byte) (out string, err error) {
 		// problem it is instead of indexing an empty document.
 		return "", fmt.Errorf("no extractable text in %d page(s) — this is likely a scanned or image-only PDF, which needs OCR", pages)
 	}
-	return joinBlocks(blocks), nil
+	text := joinBlocks(blocks)
+	// The second silent failure, and the worse one: text comes out, but with
+	// every word run together. Some producers — LaTeX with Type 1 fonts is the
+	// common case — give the reader no glyph widths, and a space between two
+	// runs is only inferable from the gap between them. With every X and W
+	// reported as zero there is no gap to measure, so a page arrives as
+	// "46CHAPTER2.MULTI-ARMBANDITSUsingthis,wecanwrite".
+	//
+	// That is unrecoverable here rather than merely ugly. The sparse leg splits
+	// on non-alphanumerics, so a whole page becomes one token that matches no
+	// query, and the dense leg embeds subword garbage. Indexing it produces a
+	// document that is silently unfindable — and worse, one that can still be
+	// retrieved by luck and quoted into an answer.
+	if unsegmented(text) {
+		return "", fmt.Errorf("text extracted but word boundaries were lost — " +
+			"this PDF reports no glyph widths, so spaces cannot be recovered " +
+			"(common in LaTeX-produced files). Re-save it from a viewer that " +
+			"re-encodes fonts, or run it through OCR; indexing it as-is would " +
+			"make it unsearchable")
+	}
+	return text, nil
+}
+
+// unsegmented reports whether extracted text has lost its word boundaries.
+//
+// Measured as the share of letters sitting inside absurdly long whitespace-
+// delimited tokens, which is stable against the things that look similar but
+// are fine: one long URL or a base64 blob on an otherwise normal page moves
+// this a little, a page with no spaces at all moves it to ~1.
+//
+// Scripts that legitimately do not use spaces (CJK) would trip a naive space
+// count, so this only judges text that is predominantly Latin letters.
+func unsegmented(s string) bool {
+	const longToken = 40
+	var latin, inLong int
+	for _, f := range strings.Fields(s) {
+		n := 0
+		for _, r := range f {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				n++
+			}
+		}
+		latin += n
+		if len([]rune(f)) > longToken {
+			inLong += n
+		}
+	}
+	// Too little Latin text to judge: either very short, or not this script.
+	if latin < 200 {
+		return false
+	}
+	return float64(inLong)/float64(latin) > 0.5
 }
 
 // pageText reconstructs a page's lines from positioned text runs.

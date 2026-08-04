@@ -90,3 +90,35 @@ func TestPDFNoTextLayerExplainsItself(t *testing.T) {
 		t.Errorf("error should point at OCR, got: %v", err)
 	}
 }
+
+// Extraction that yields text but no word boundaries is worse than extraction
+// that yields nothing: the document indexes, retrieves by luck, and gets quoted
+// into an answer. This is the guard that turns it into an error.
+func TestUnsegmentedDetectsLostWordBoundaries(t *testing.T) {
+	prose := strings.Repeat("The agent selects an action and observes the reward that follows it. ", 12)
+
+	// A real page from a LaTeX PDF with no glyph widths: one run-together token.
+	mangled := strings.ReplaceAll(prose, " ", "")
+
+	for _, tc := range []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"ordinary prose", prose, false},
+		{"every word run together", mangled, true},
+		{"prose with one long URL", prose + " https://example.com/" + strings.Repeat("a", 90), false},
+		{"prose with a base64 blob", prose + " " + strings.Repeat("QUJD", 40), false},
+		// Short strings cannot be judged either way, and guessing on them would
+		// reject legitimate cover pages and slide titles.
+		{"too short to judge", "Chapter 2", false},
+		{"empty", "", false},
+		// Scripts without spaces are not broken, they are just not Latin. A
+		// naive space-ratio check would reject every CJK document.
+		{"CJK without spaces", strings.Repeat("強化学習は報酬を最大化する方法を学ぶ", 30), false},
+	} {
+		if got := unsegmented(tc.in); got != tc.want {
+			t.Errorf("%s: unsegmented() = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

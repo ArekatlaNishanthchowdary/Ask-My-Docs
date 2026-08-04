@@ -22,6 +22,15 @@ type GoldenItem struct {
 	Gold     string   `json:"gold_answer,omitempty"`
 	Stage    string   `json:"stage,omitempty"` // retrieval | rerank | generation
 	ACL      []string `json:"acl,omitempty"`
+
+	// AnswerContains is a literal string from the source that answers the
+	// query. It exists because chunk ids are not comparable across chunk
+	// settings: change MAX_CHUNK_CHARS and every id shifts, so relevant_chunk_ids
+	// scores zero everywhere and the comparison is impossible — which is exactly
+	// the comparison you want when tuning chunking. Matching on text the answer
+	// must contain survives re-chunking, so two chunk configurations can be
+	// scored against one another.
+	AnswerContains string `json:"answer_contains,omitempty"`
 }
 
 type Metrics struct {
@@ -31,6 +40,11 @@ type Metrics struct {
 	MRR               float64 `json:"mrr"`
 	RetrievalNDCGAt10 float64 `json:"retrieval_ndcg_at_10"` // pre-rerank baseline
 	RerankLift        float64 `json:"rerank_lift"`
+	// Scored from answer_contains rather than chunk ids, so these two survive a
+	// change to chunking and are the only metrics here that can compare one
+	// chunk configuration against another.
+	AnswerHitAt10     float64 `json:"answer_hit_at_10"`
+	AnswerMRR         float64 `json:"answer_mrr"`
 	CitationPrecision float64 `json:"citation_precision"`
 	CitationRecall    float64 `json:"citation_recall"`
 	AnswerCorrectness float64 `json:"answer_correctness"`
@@ -78,23 +92,25 @@ func LoadGolden(path string) ([]GoldenItem, error) {
 // ItemResult is the per-item detail behind the aggregates. Averages say a
 // number moved; this says which query moved it and at which stage.
 type ItemResult struct {
-	ID        string
-	Stage     string
-	FirstRank int     // 1-based rank of the first relevant chunk; 0 = not retrieved
-	TopScore  float32 // reranker score of the top chunk
-	Refused   bool
-	Cited     []string
-	Judge     float64
-	Judged    bool
-	TotalMS   int64
-	Timings   Timings // stage breakdown, so a latency tail names the stage that caused it
-	Note      string
+	ID         string
+	Stage      string
+	FirstRank  int     // 1-based rank of the first relevant chunk; 0 = not retrieved
+	AnswerRank int     // 1-based rank of the first chunk containing answer_contains
+	TopScore   float32 // reranker score of the top chunk
+	Refused    bool
+	Cited      []string
+	Judge      float64
+	Judged     bool
+	TotalMS    int64
+	Timings    Timings // stage breakdown, so a latency tail names the stage that caused it
+	Note       string
 }
 
 // RunEval executes every golden item through the real pipeline and aggregates.
 func (a *App) RunEval(ctx context.Context, items []GoldenItem, judge bool) (Metrics, []ItemResult, error) {
 	var m Metrics
 	var recalls, ndcgs, rrs, baseNDCG, citP, citR, correct []float64
+	var ansHit, ansRR []float64
 	var totals, retrieves, reranks, generates, verifies []int64
 	results := make([]ItemResult, 0, len(items))
 
@@ -129,6 +145,32 @@ func (a *App) RunEval(ctx context.Context, items []GoldenItem, judge bool) (Metr
 				break
 			}
 		}
+		// Chunking-invariant scoring: find the highest-ranked chunk whose text
+		// actually contains the answer. Rank matters as much as presence — a
+		// chunk setting that surfaces the answer at position 9 instead of 1 has
+		// made retrieval worse even though both "found" it.
+		if it.AnswerContains != "" {
+			hit, rr := 0.0, 0.0
+			// Compared with whitespace collapsed on both sides. Source text is
+			// wrapped at whatever width its author used, so a key long enough to
+			// be unambiguous will cross a newline — and would then never match,
+			// scoring the item 0 forever without ever erroring. That is the same
+			// silent-staleness failure CheckGoldenIDs exists to prevent.
+			want := normalizeWS(it.AnswerContains)
+			for i, s := range stage.Ranked {
+				if i >= 10 {
+					break
+				}
+				if strings.Contains(normalizeWS(s.Text), want) {
+					hit, rr = 1, 1/float64(i+1)
+					res.AnswerRank = i + 1
+					break
+				}
+			}
+			ansHit = append(ansHit, hit)
+			ansRR = append(ansRR, rr)
+		}
+
 		// Negative-rejection items have no relevant chunks by construction.
 		// Scoring them as recall 0 would punish the system for behaving
 		// correctly, so they contribute to citation and answer metrics only.
@@ -210,6 +252,8 @@ func (a *App) RunEval(ctx context.Context, items []GoldenItem, judge bool) (Metr
 	m.MRR = mean(rrs)
 	m.RetrievalNDCGAt10 = mean(baseNDCG)
 	m.RerankLift = m.NDCGAt10 - m.RetrievalNDCGAt10
+	m.AnswerHitAt10 = mean(ansHit)
+	m.AnswerMRR = mean(ansRR)
 	m.CitationPrecision = mean(citP)
 	m.CitationRecall = mean(citR)
 	m.AnswerCorrectness = mean(correct)
@@ -358,6 +402,10 @@ func (a *App) Calibrate(ctx context.Context, items []GoldenItem) error {
 }
 
 // --- Metric primitives ----------------------------------------------------
+
+// normalizeWS collapses every run of whitespace to a single space, so a match
+// does not depend on where the source happened to wrap its lines.
+func normalizeWS(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 func ids(ss []Source) []string {
 	out := make([]string, len(ss))
