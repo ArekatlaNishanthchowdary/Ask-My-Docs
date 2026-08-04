@@ -187,6 +187,8 @@
     <input id="file" type="file" class="hidden" multiple
            accept=".md,.markdown,.txt,.csv,.tsv,.tab,.pdf,.docx,.pptx,.xlsx">
     <button id="add" class="linkbtn" type="button">+ Add documents</button>
+    <button id="reindex" class="linkbtn" type="button"
+            title="Index files already in the corpus directory. Documents unchanged since the last run are skipped.">Re-index corpus</button>
     <span id="docstate">— or drag files anywhere on this page</span>
   </div>
   <div id="doclist"></div>
@@ -363,6 +365,7 @@ loadProviders();
 // indexed in the same request.
 
 $('#add').onclick = () => $('#file').click();
+$('#reindex').onclick = () => reindex();
 $('#file').onchange = e => { upload(e.target.files); e.target.value = ''; };
 
 let dragDepth = 0;
@@ -379,6 +382,33 @@ addEventListener('drop', e => {
   e.preventDefault(); dragDepth = 0; $('#drop').classList.remove('on');
   upload(e.dataTransfer.files);
 });
+
+// Indexes what is already in the corpus directory, for files that did not
+// arrive through this page. Unchanged documents are skipped server-side, so
+// the usual outcome is "nothing to do" in milliseconds — and saying that
+// plainly is better than a success message implying work was done.
+async function reindex() {
+  const state = $('#docstate');
+  const btn = $('#reindex');
+  btn.disabled = $('#add').disabled = true;
+  state.innerHTML = '<span class="spin"></span> &nbsp;indexing the corpus directory — this can take a while on a large document…';
+  try {
+    const acl = $('#acl').value.trim();
+    const r = await api('/ingest' + (acl ? '?acl=' + encodeURIComponent(acl) : ''), { method: 'POST' });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.statusText);
+    await Promise.all([refreshStatus(), listDocs()]);
+    state.replaceChildren(document.createTextNode(
+      d.indexed
+        ? `— indexed ${d.indexed} document${d.indexed === 1 ? '' : 's'}, ${d.chunks_added} chunks` +
+          (d.skipped ? ` (${d.skipped} unchanged)` : '')
+        : `— nothing to do, all ${d.skipped} document${d.skipped === 1 ? '' : 's'} already current`));
+  } catch (err) {
+    state.replaceChildren(Object.assign(el('span', 'chipfile bad'), { textContent: err.message }));
+  } finally {
+    btn.disabled = $('#add').disabled = false;
+  }
+}
 
 async function upload(fileList) {
   const files = [...(fileList || [])];

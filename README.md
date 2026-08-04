@@ -423,6 +423,7 @@ OPENAI_API_KEY=... ./ask-my-docs eval -verbose
 | `POST` | `/query` | token | `{"question": "...", "no_cache": false}` → answer, claims, sources, timings, warnings |
 | `GET` | `/documents` | token | Documents the caller may read, with per-document chunk counts |
 | `POST` | `/documents` | **admin** | Multipart upload — writes into `corpus/` and indexes in the same request |
+| `POST` | `/ingest` | **admin** | Index what is already in `corpus/`; skips documents unchanged since the last run |
 | `GET` | `/providers` | token | Current stage assignments, available backends with models, and why any are unavailable |
 | `POST` | `/providers` | **admin** | `{"stage": "llm", "provider": "nvidia", "model": "..."}` — switch at runtime |
 | `GET` | `/healthz` | open | Live config: provider, model, reranker, gate threshold, chunk count |
@@ -503,6 +504,11 @@ would throw away:
   ceiling and sub-threshold chunks are dropped, so this is usually fewer than 10.
 - **Pipeline notes** — dropped citations, generator retries, unentailed claims.
   A refusal comes with the reason it refused.
+- **Re-index corpus** — indexes files that are in `corpus/` but did not arrive
+  through this page: copied in, restored from a backup, written by a sync job.
+  The document list marks those `not indexed — run ingest`, and this is the
+  button that acts on it. Unchanged documents are skipped, so the usual outcome
+  is "nothing to do" in milliseconds.
 - **Runtime provider/model switching** for the generate and verify stages,
   grouped by provider, with unavailable providers shown *alongside the reason*
   rather than hidden.

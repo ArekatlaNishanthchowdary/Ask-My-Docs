@@ -245,6 +245,10 @@ type App struct {
 	// permits with ALLOW_ANONYMOUS set explicitly.
 	Tokens TokenStore
 
+	// ingesting serialises POST /ingest against itself. Held for the whole
+	// walk, which can be minutes.
+	ingesting sync.Mutex
+
 	// embedDim is the probed vector width, kept so collections can be recreated
 	// (e.g. clearing the cache) without probing the model again.
 	embedDim int
@@ -992,6 +996,62 @@ func cmdServe(ctx context.Context, a *App, args []string) error {
 		log.Printf("%s uploaded %d file(s), %d chunks indexed, acl=%v", p.Name, len(files), indexed, acl)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"results": results, "chunks_added": indexed, "chunks_total": total,
+		})
+	}))
+
+	// POST /ingest — index whatever is already in the corpus directory.
+	//
+	// Uploading and indexing are the same request in POST /documents, which
+	// covers files that arrive through the UI and nothing else. Files that got
+	// there any other way — copied in, restored from a backup, written by a
+	// sync job — were CLI-only until now, and GET /documents would list them at
+	// zero chunks with no way to act on it.
+	//
+	// Admin-only for the same reason uploading is: it changes what every other
+	// caller can retrieve.
+	mux.HandleFunc("POST /ingest", a.guard(true, func(w http.ResponseWriter, r *http.Request, p Principal) {
+		// Unchanged documents are skipped by version, so the common case costs
+		// a count query per document and no tokens. -force is deliberately not
+		// exposed here: it re-contextualizes the whole corpus, which is the
+		// most expensive thing this system can be asked to do, and a button
+		// that does it by accident is worse than a flag you have to type.
+		// One at a time. Two concurrent walks of the same directory would
+		// contextualize and embed every document twice, which is the most
+		// expensive way this system can waste a token — and a button invites
+		// exactly that, because a slow one gets clicked again.
+		if !a.ingesting.TryLock() {
+			httpErr(w, http.StatusConflict, "an ingest is already running")
+			return
+		}
+		defer a.ingesting.Unlock()
+
+		acl := splitCSV(r.URL.Query().Get("acl"))
+		// Deliberately NOT r.Context(). Indexing a corpus can run for minutes,
+		// and tying it to the request means closing the tab aborts it partway
+		// — measured here, a browser giving up cancelled the embed mid-document
+		// and the work was thrown away. The response is still sent to whoever
+		// is listening; the difference is that the indexing finishes either way.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Minute)
+		defer cancel()
+
+		indexed, skipped, chunks, err := a.IngestDir(ctx, a.Cfg.CorpusDir, acl, false)
+		if err != nil {
+			log.Printf("%s ingest failed: %v", p.Name, err)
+			httpErr(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		if chunks > 0 {
+			// Same reason as upload: a new document can change the right answer
+			// to a question already in the cache, and a hit skips retrieval.
+			if err := a.ClearCache(ctx); err != nil {
+				log.Printf("clearing semantic cache after ingest: %v", err)
+			}
+		}
+		total, _ := a.Qdrant.Count(ctx, a.Cfg.Collection)
+		log.Printf("%s re-indexed %s: %d document(s), %d unchanged, %d chunks", p.Name, a.Cfg.CorpusDir, indexed, skipped, chunks)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"indexed": indexed, "skipped": skipped,
+			"chunks_added": chunks, "chunks_total": total,
 		})
 	}))
 
