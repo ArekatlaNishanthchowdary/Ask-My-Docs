@@ -202,13 +202,18 @@ func (q *Qdrant) CountFiltered(ctx context.Context, name string, filter map[stri
 	return out.Result.Count, err
 }
 
-// DocIDFilter matches every chunk belonging to one document.
-func DocIDFilter(docID string) map[string]any {
-	return map[string]any{
-		"must": []map[string]any{
-			{"key": "doc_id", "match": map[string]any{"value": docID}},
-		},
+// DocIDFilter matches every chunk belonging to one document that the given
+// tags may see. A nil acl means unrestricted; anything else narrows the match,
+// which is what lets a document listing answer "how many chunks of this can
+// *you* read" rather than "how many exist".
+func DocIDFilter(docID string, acl []string) map[string]any {
+	must := []map[string]any{
+		{"key": "doc_id", "match": map[string]any{"value": docID}},
 	}
+	if len(acl) > 0 {
+		must = append(must, map[string]any{"key": "acl", "match": map[string]any{"any": acl}})
+	}
+	return map[string]any{"must": must}
 }
 
 // DocVersionFilter matches one document's chunks only at one version, which is

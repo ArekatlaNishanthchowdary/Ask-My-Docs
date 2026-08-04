@@ -6,6 +6,12 @@ ask-my-docs.exe~
 # Secrets. Never commit this — .env.example is the template.
 .env
 
+# Principal files. These hold token hashes rather than tokens, so a leak is not
+# immediately a set of usable credentials — but it is still the list of who can
+# read what, and that is nobody else's business.
+tokens.json
+*.tokens.json
+
 # Your documents are yours. Everything under corpus/ is ignored except the
 # README explaining what goes there, so a clone starts empty and nobody
 # publishes their own corpus by accident.
@@ -16,6 +22,7 @@ corpus/*
 # backends, so it is generated locally rather than shared.
 metrics.json
 eval/baseline.json
+eval/ablation.json
 
 # Runtime logs
 *.log

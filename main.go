@@ -82,6 +82,8 @@ type Config struct {
 	CorpusDir         string
 	MaxUploadMB       int
 	RequestTimeoutSec int
+	AuthTokensFile    string
+	AllowAnonymous    bool
 	CandidateK        int     // fused candidates handed to the reranker
 	TopK              int     // chunks handed to the model
 	MinRerankScore    float32 // confidence gate
@@ -164,6 +166,8 @@ func LoadConfig() Config {
 		CorpusDir:         env("CORPUS_DIR", "corpus"),
 		MaxUploadMB:       envInt("MAX_UPLOAD_MB", 32),
 		RequestTimeoutSec: envInt("REQUEST_TIMEOUT_SEC", 240),
+		AuthTokensFile:    os.Getenv("AUTH_TOKENS_FILE"),
+		AllowAnonymous:    os.Getenv("ALLOW_ANONYMOUS") != "",
 		CandidateK:        envInt("CANDIDATE_K", 50),
 		TopK:              envInt("TOP_K", 10),
 		// The gate threshold is meaningless across rerankers: an LLM scorer emits
@@ -224,6 +228,10 @@ type App struct {
 
 	// Verifier runs the entailment check; defaults to LLM.
 	Verifier LLM
+
+	// Tokens is nil when the server runs unauthenticated, which cmdServe only
+	// permits with ALLOW_ANONYMOUS set explicitly.
+	Tokens TokenStore
 
 	// embedDim is the probed vector width, kept so collections can be recreated
 	// (e.g. clearing the cache) without probing the model again.
@@ -581,6 +589,12 @@ func main() {
 		run(ctx, cfg, cmdAblate)
 	case "calibrate":
 		run(ctx, cfg, cmdCalibrate)
+	case "token":
+		// Offline: minting a credential needs no services, and requiring them
+		// would mean standing up the whole stack to add a user.
+		if err := cmdToken(os.Args[2:]); err != nil {
+			log.Fatalf("error: %v", err)
+		}
 	case "detect":
 		// Offline and service-free by design: it runs before `docker compose
 		// up`, which is the whole point.
@@ -661,6 +675,7 @@ func usage() {
   eval     Run the golden eval set and gate on regressions
   ablate   Run the golden set once per pipeline stage and print what each is worth
   calibrate Derive MIN_RERANK_SCORE from the golden set
+  token    Mint a bearer token and its AUTH_TOKENS_FILE entry (offline, no keys)
   chunks   Print chunk boundaries and ids for a directory (offline, no keys)
   detect   Pick the reranker image for this machine's GPU and write it to .env
   version  Print the build version
@@ -686,9 +701,32 @@ func cmdServe(ctx context.Context, a *App, args []string) error {
 	if err := a.EnsureCollections(ctx); err != nil {
 		return err
 	}
+	switch {
+	case a.Cfg.AuthTokensFile != "":
+		tokens, err := LoadTokens(a.Cfg.AuthTokensFile)
+		if err != nil {
+			return err
+		}
+		a.Tokens = tokens
+		log.Printf("auth: %d principal(s) from %s", len(tokens), a.Cfg.AuthTokensFile)
+	case a.Cfg.AllowAnonymous:
+		// Loud, because the thing being given away is every document in the
+		// index plus the ability to add more.
+		log.Printf("WARNING: ALLOW_ANONYMOUS is set — %s serves every indexed document, "+
+			"and accepts uploads and model switches, from anyone who can reach it. "+
+			"Set AUTH_TOKENS_FILE before this is reachable by anything you do not trust.", a.Cfg.Addr)
+	default:
+		// Refusing to start is the only version of this that stays true. A
+		// warning gets scrolled past; a default-open server does not announce
+		// itself again after the day it was set up.
+		return fmt.Errorf("refusing to serve without authentication: set AUTH_TOKENS_FILE " +
+			"(mint an entry with `ask-my-docs token <name>`), or set ALLOW_ANONYMOUS=1 to " +
+			"accept that every caller may read every indexed document, upload more, and " +
+			"switch models")
+	}
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("POST /query", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /query", a.guard(false, func(w http.ResponseWriter, r *http.Request, p Principal) {
 		var req QueryRequest
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 			httpErr(w, http.StatusBadRequest, "invalid JSON body")
@@ -698,6 +736,10 @@ func cmdServe(ctx context.Context, a *App, args []string) error {
 			httpErr(w, http.StatusBadRequest, "question is required")
 			return
 		}
+		// The whole point of the auth boundary: whatever acl the caller put in
+		// the body is discarded and replaced with what their token grants.
+		// Merging the two would restore exactly the hole this closes.
+		req.ACL = p.Tags()
 		ctx, cancel := context.WithTimeout(r.Context(), time.Duration(a.Cfg.RequestTimeoutSec)*time.Second)
 		defer cancel()
 		resp, err := a.Query(ctx, req)
@@ -712,12 +754,12 @@ func cmdServe(ctx context.Context, a *App, args []string) error {
 			return
 		}
 		writeJSON(w, http.StatusOK, resp)
-	})
+	}))
 
 	// GET /providers — what each generative stage is using, and what it could
 	// use. Model lists come from the providers themselves rather than a
 	// hardcoded table, so they stay true as models are pulled or retired.
-	mux.HandleFunc("GET /providers", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /providers", a.guard(false, func(w http.ResponseWriter, r *http.Request, _ Principal) {
 		a.mu.RLock()
 		cur := map[string]stageName{"llm": a.llmName, "verify": a.verifyName, "judge": a.judgeName}
 		a.mu.RUnlock()
@@ -731,11 +773,13 @@ func cmdServe(ctx context.Context, a *App, args []string) error {
 					a.Cfg.OllamaEmbedModel, a.embedDim),
 			},
 		})
-	})
+	}))
 
 	// POST /providers — switch a stage. Validated before it is applied, so a
 	// bad choice returns an error instead of breaking every later query.
-	mux.HandleFunc("POST /providers", func(w http.ResponseWriter, r *http.Request) {
+	// Admin-only: this changes which model answers for every caller, not just
+	// the one asking.
+	mux.HandleFunc("POST /providers", a.guard(true, func(w http.ResponseWriter, r *http.Request, p Principal) {
 		var req struct {
 			Stage    string `json:"stage"`
 			Provider string `json:"provider"`
@@ -770,27 +814,44 @@ func cmdServe(ctx context.Context, a *App, args []string) error {
 		}
 		a.mu.Unlock()
 
-		log.Printf("switched %s to %s/%s", req.Stage, name.Provider, name.Model)
+		log.Printf("%s switched %s to %s/%s", p.Name, req.Stage, name.Provider, name.Model)
 		writeJSON(w, http.StatusOK, map[string]any{"stage": req.Stage, "using": name})
-	})
+	}))
 
-	// GET /documents — what is currently in the corpus directory.
-	mux.HandleFunc("GET /documents", func(w http.ResponseWriter, r *http.Request) {
-		docs, err := listCorpus(a.Cfg.CorpusDir)
+	// GET /documents — what is currently in the corpus directory, restricted to
+	// what the caller may actually read. A filename is itself information —
+	// "you cannot open this, but it is called 2026_redundancies.docx" is the
+	// same leak in a smaller package — so a document with no readable chunks is
+	// omitted entirely rather than listed with a zero.
+	mux.HandleFunc("GET /documents", a.guard(false, func(w http.ResponseWriter, r *http.Request, p Principal) {
+		all, err := listCorpus(a.Cfg.CorpusDir)
 		if err != nil {
 			httpErr(w, http.StatusInternalServerError, "cannot read corpus directory")
 			return
 		}
-		// Report indexed chunks per document, not just what is on disk. A file
-		// present with zero chunks means it was saved but never indexed — a
-		// state worth being able to see rather than having to infer.
-		for i := range docs {
-			if n, err := a.Qdrant.CountFiltered(r.Context(), a.Cfg.Collection, DocIDFilter(docs[i].Name)); err == nil {
-				docs[i].Chunks = n
+		tags := p.Tags()
+		docs := all[:0:0]
+		for _, d := range all {
+			// Report indexed chunks per document, not just what is on disk. A
+			// file present with zero chunks means it was saved but never
+			// indexed — a state worth being able to see rather than infer.
+			n, err := a.Qdrant.CountFiltered(r.Context(), a.Cfg.Collection, DocIDFilter(d.Name, tags))
+			if err != nil {
+				// Unknown is not the same as permitted. For an unrestricted
+				// caller the count is cosmetic and the file is listed anyway;
+				// for a restricted one it is the access check, so drop it.
+				if len(tags) > 0 {
+					continue
+				}
 			}
+			if len(tags) > 0 && n == 0 {
+				continue
+			}
+			d.Chunks = n
+			docs = append(docs, d)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"documents": docs})
-	})
+	}))
 
 	// POST /documents — upload files into the corpus directory and index them.
 	//
@@ -798,7 +859,12 @@ func cmdServe(ctx context.Context, a *App, args []string) error {
 	// is several seconds per document on a local model, so this is a slow
 	// request by design rather than a job queue plus polling. If you routinely
 	// upload dozens at once, that is the point to add one.
-	mux.HandleFunc("POST /documents", func(w http.ResponseWriter, r *http.Request) {
+	//
+	// Admin-only: an upload writes to the corpus directory and puts text into
+	// the index that every later answer may be built from. The acl form value
+	// decides who can then retrieve it, which makes this the endpoint that
+	// hands out access rather than one that consumes it.
+	mux.HandleFunc("POST /documents", a.guard(true, func(w http.ResponseWriter, r *http.Request, p Principal) {
 		maxBytes := int64(a.Cfg.MaxUploadMB) << 20
 		r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 		if err := r.ParseMultipartForm(16 << 20); err != nil {
@@ -882,10 +948,11 @@ func cmdServe(ctx context.Context, a *App, args []string) error {
 			}
 		}
 		total, _ := a.Qdrant.Count(ctx, a.Cfg.Collection)
+		log.Printf("%s uploaded %d file(s), %d chunks indexed, acl=%v", p.Name, len(files), indexed, acl)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"results": results, "chunks_added": indexed, "chunks_total": total,
 		})
-	})
+	}))
 
 	// The UI is a single embedded file — no build step, no npm, and it ships
 	// inside the same binary as the API it talks to.

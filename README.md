@@ -176,8 +176,12 @@ indexing — this needs no services and no keys:
 ```bash
 ./ask-my-docs chunks -dir corpus     # ids, sizes, section paths
 ./ask-my-docs ingest -dir corpus
-./ask-my-docs serve                  # UI + API on http://localhost:8080
+ALLOW_ANONYMOUS=1 ./ask-my-docs serve  # UI + API on http://localhost:8080
 ```
+
+`serve` will not start without an authentication decision. `ALLOW_ANONYMOUS=1`
+is the local-demo answer and means what it says: anyone who can reach the port
+reads every indexed document. See [Authentication](#authentication) for tokens.
 
 Ingest is idempotent — re-running overwrites in place.
 
@@ -307,26 +311,66 @@ answers as an upper bound, not a measurement.
 | `eval [-verbose] [-update-baseline]` | Run the golden set, print metrics, fail on regression. |
 | `ablate [-judge=false] [-from N]` | Run the golden set once per pipeline stage and print what each stage is worth. |
 | `calibrate` | Derive `MIN_RERANK_SCORE` from the golden set instead of guessing. |
+| `token [NAME]` | Mint a bearer token and print the `AUTH_TOKENS_FILE` entry for it. Offline. |
 | `chunks -dir DIR [-text]` | Print chunk boundaries and ids. Offline — no keys, no services. |
 | `detect` | Detect the GPU, pick the reranker image, write it to `.env`. Offline. |
 | `version` | Print the build version (`dev` for a local `go build`). |
 
 ## HTTP API
 
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/query` | `{"question": "...", "acl": [], "no_cache": false}` → answer, claims, sources, timings, warnings |
-| `GET` | `/documents` | Indexed documents with per-document chunk counts |
-| `POST` | `/documents` | Multipart upload — writes into `corpus/` and indexes in the same request |
-| `GET` | `/providers` | Current stage assignments, available backends with models, and why any are unavailable |
-| `POST` | `/providers` | `{"stage": "llm", "provider": "nvidia", "model": "..."}` — switch at runtime |
-| `GET` | `/healthz` | Live config: provider, model, reranker, gate threshold, chunk count |
-| `GET` | `/` | The web UI |
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `POST` | `/query` | token | `{"question": "...", "no_cache": false}` → answer, claims, sources, timings, warnings |
+| `GET` | `/documents` | token | Documents the caller may read, with per-document chunk counts |
+| `POST` | `/documents` | **admin** | Multipart upload — writes into `corpus/` and indexes in the same request |
+| `GET` | `/providers` | token | Current stage assignments, available backends with models, and why any are unavailable |
+| `POST` | `/providers` | **admin** | `{"stage": "llm", "provider": "nvidia", "model": "..."}` — switch at runtime |
+| `GET` | `/healthz` | open | Live config: provider, model, reranker, gate threshold, chunk count |
+| `GET` | `/` | open | The web UI |
 
 A provider switch is validated against the provider's own model listing before
 it is applied — a *listing lookup*, not a probe call, because a probe would burn
 tokens from the budget people are escaping. It takes effect immediately for
 in-flight requests without a restart.
+
+### Authentication
+
+`serve` refuses to start unless you set `AUTH_TOKENS_FILE` or explicitly set
+`ALLOW_ANONYMOUS=1`. The failure mode of a default-open server is silence, so
+this one says something once rather than nothing forever.
+
+```bash
+ask-my-docs token alice          # prints a token, and the entry to paste
+AUTH_TOKENS_FILE=tokens.json ask-my-docs serve
+curl -H "Authorization: Bearer $TOKEN" -d '{"question":"…"}' localhost:8080/query
+```
+
+**The ACL tags come from the token, and the request body's `acl` field is
+discarded — not merged.** That substitution is the whole reason this exists.
+Before it, retrieval was filtered by tags the *caller* supplied, so anyone who
+knew a tag existed could ask for it and be given the documents. That is not
+access control; it is a filter the client picks.
+
+Consequences worth knowing:
+
+- `acl: ["*"]` is unrestricted. An **empty** list is refused at startup rather
+  than read as "no filter" — that reading is precisely how a config slip
+  becomes a data leak, so the safe meaning has to be the one you type.
+- Only the SHA-256 of a token is stored. A leaked principal file is the list of
+  who can read what, which is bad, but it is not a set of working credentials.
+- `admin: true` gates uploading documents and switching models. Both change
+  what *every other caller* sees, which is what separates them from reading.
+- `GET /documents` hides documents the caller cannot read, rather than listing
+  them with a zero count. A filename is itself information.
+- Principals with tags bypass the semantic cache, because a cached answer is
+  keyed on the question alone and would otherwise cross the boundary.
+- `/healthz` and the UI page stay open: a health check that needs a credential
+  is useless to a load balancer, and the HTML contains no documents.
+
+ponytail: static bearer tokens, not OIDC. The property that matters is "the
+server decides what you may see", and a token file delivers it with stdlib and
+no identity provider to run. Swapping in OIDC later means replacing `Lookup`;
+the query path never learns the difference.
 
 ## Web UI
 
@@ -672,8 +716,12 @@ case- and separator-insensitively, but **only against chunks that were actually
 retrieved**, and an id matching more than one is dropped rather than guessed.
 Invented ids still match nothing.
 
-**ACLs.** Every chunk carries `acl` tags; `-acl` filters retrieval at the
-Qdrant level, before anything reaches the model.
+**ACLs.** Every chunk carries `acl` tags, and retrieval is filtered at the
+Qdrant level before anything reaches the model. Over HTTP the tags come from
+the caller's token, never from the request body — see
+[Authentication](#authentication). The CLI's `-acl` flag is the same filter
+with no boundary in front of it, which is appropriate for a local operator and
+would not be for a network caller.
 
 ## Tests
 
@@ -747,6 +795,16 @@ Deliberately deferred:
 - **Kubernetes manifests, HPA, OpenTelemetry** — the binary is stateless and
   per-stage timings are already on every response, so wiring a tracer is
   additive.
+- **OIDC / SSO, token expiry, revocation lists, per-caller rate limits** —
+  bearer tokens from a file establish that *the server* decides what a caller
+  may see, which was the gap that mattered. Everything above is lifecycle
+  management on top of a boundary that now exists; none of it changes the
+  query path.
+
+Known gaps that are **not** deliberate, in case this is being read as a
+finished system: deleting a file from `corpus/` does not remove it from the
+index, and nothing here has been run against a corpus larger than a few
+hundred chunks.
 
 ## License
 

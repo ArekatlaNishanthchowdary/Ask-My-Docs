@@ -167,6 +167,9 @@
   <header>
     <h1>Ask My Docs</h1>
     <div id="status">checking…</div>
+    <label id="tokenbox" class="hidden" title="Bearer token. What it grants decides which documents you can retrieve.">
+      token <input id="token" type="password" placeholder="paste your token" autocomplete="off">
+    </label>
   </header>
 
   <form id="f">
@@ -174,8 +177,8 @@
     <button id="go" type="submit">Ask</button>
   </form>
   <div class="opts">
-    <label title="Permission tags. Retrieval is filtered to chunks carrying at least one of these.">
-      ACL <input id="acl" type="text" placeholder="finance,hr" autocomplete="off">
+    <label title="Tags applied to documents you upload. What you may RETRIEVE is decided by your token, not by this box.">
+      Upload ACL <input id="acl" type="text" placeholder="finance,hr" autocomplete="off">
     </label>
     <label title="Bypass the semantic cache."><input id="nocache" type="checkbox"> no cache</label>
   </div>
@@ -201,6 +204,23 @@
 
 <script>
 const $ = s => document.querySelector(s);
+
+// api wraps fetch so the bearer token is attached in exactly one place. A 401
+// reveals the token box rather than reporting a failure: on an unauthenticated
+// server the box never appears, which is the only way the UI is allowed to say
+// anything about whether auth is on.
+const api = async (url, opts = {}) => {
+  const tok = localStorage.getItem('amd_token');
+  const headers = { ...(opts.headers || {}) };
+  if (tok) headers['Authorization'] = 'Bearer ' + tok;
+  const r = await fetch(url, { ...opts, headers });
+  if (r.status === 401) {
+    $('#tokenbox').classList.remove('hidden');
+    $('#token').focus();
+    if (tok) localStorage.removeItem('amd_token');
+  }
+  return r;
+};
 const el = (t, c, txt) => { const n = document.createElement(t); if (c) n.className = c; if (txt != null) n.textContent = txt; return n; };
 
 // Stage colours are fixed so the same stage is the same colour every query —
@@ -221,7 +241,7 @@ function refreshStatus() {
 // every load rather than only after an upload. Previously a refresh left the
 // page looking empty even though the documents were still indexed.
 function listDocs() {
-  return fetch('/documents').then(r => r.json()).then(d => {
+  return api('/documents').then(r => r.json()).then(d => {
     const docs = d.documents || [];
     const list = $('#doclist');
     list.replaceChildren();
@@ -262,7 +282,7 @@ function fmtBytes(n) {
 // model, and changing it would not error — it would silently retrieve nonsense.
 
 function loadProviders() {
-  return fetch('/providers').then(r => r.json()).then(p => {
+  return api('/providers').then(r => r.json()).then(p => {
     fillStage('#llm-sel', 'llm', p);
     fillStage('#verify-sel', 'verify', p);
     $('#fixednote').textContent = 'embeddings: ' + (p.fixed?.embeddings || '');
@@ -304,7 +324,7 @@ function fillStage(id, stage, p) {
     const previous = sel.dataset.current;
     sel.disabled = true;
     try {
-      const r = await fetch('/providers', {
+      const r = await api('/providers', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stage, provider, model }),
       });
@@ -323,6 +343,16 @@ function fillStage(id, stage, p) {
   };
   sel.dataset.current = sel.value;
 }
+
+$('#token').onchange = async () => {
+  const v = $('#token').value.trim();
+  if (!v) return;
+  localStorage.setItem('amd_token', v);
+  $('#token').value = '';
+  // Reloading the two authenticated views is the confirmation: they either
+  // populate or bounce straight back to 401.
+  await Promise.all([listDocs(), loadProviders()]);
+};
 
 refreshStatus();
 listDocs();
@@ -364,7 +394,7 @@ async function upload(fileList) {
   if (acl) fd.append('acl', acl);
 
   try {
-    const r = await fetch('/documents', { method: 'POST', body: fd });
+    const r = await api('/documents', { method: 'POST', body: fd });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || r.statusText);
 
@@ -404,11 +434,13 @@ $('#f').addEventListener('submit', async e => {
     innerHTML: '<span class="spin"></span> &nbsp;retrieving, reranking, generating, verifying…'
   }));
 
-  const acl = $('#acl').value.split(',').map(s => s.trim()).filter(Boolean);
+  // No acl here on purpose. The server takes the caller's tags from their
+  // token and discards anything the body claims, so sending one would only
+  // suggest this box still decides what you can read. It does not.
   try {
-    const r = await fetch('/query', {
+    const r = await api('/query', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, acl, no_cache: $('#nocache').checked }),
+      body: JSON.stringify({ question, no_cache: $('#nocache').checked }),
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || r.statusText);
