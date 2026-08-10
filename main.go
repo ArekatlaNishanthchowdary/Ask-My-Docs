@@ -1523,7 +1523,7 @@ func envFloat(k string, def float64) float64 {
 // A closed set, because the whole point of an ablation is that the config
 // matches the claim. ABLATE=rerankr measuring nothing and reporting a number
 // anyway is worse than a crash: it produces a benchmark row that looks real.
-var ablatable = []string{"sparse", "rerank", "gate", "llmcontext", "context", "citations", "verify"}
+var ablatable = []string{"sparse", "rerank", "gate", "llmcontext", "context", "citations", "generate", "verify"}
 
 // parseAblate reads the ABLATE set and rejects anything it does not recognise.
 func parseAblate(raw string) (map[string]bool, error) {

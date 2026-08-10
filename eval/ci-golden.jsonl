@@ -10,6 +10,33 @@
 // everything else stops after reranking, and the two negatives are refused by
 // the confidence gate before any model call happens. Regenerate the ids with
 // `./ask-my-docs chunks -dir eval/fixtures` after touching the fixtures.
+//
+// THE CORPUS IS PART OF THE INSTRUMENT. These 19 items once scored
+// recall@10 = 1.000, which read as a pass and was really a broken gauge: the
+// fixture corpus was 25 chunks and TOP_K is 10, so retrieval returned 40% of
+// everything and recall@10 could not have come out otherwise. On that corpus
+// the cross-encoder moved nDCG by 0.048, against 0.164 on the real 300-chunk
+// corpus — a gate that cannot see the reranker cannot catch it regressing.
+//
+// eval/gen_distractors.py fixes that by generating confusable near-misses for
+// each item here — same component family, same vocabulary, different specifics
+// — taking the corpus to 169 chunks. Volume alone would not have done it;
+// random filler is trivially separable and leaves the ranking untouched.
+//
+// Two consequences worth knowing before editing this file:
+//   * The distractors are additive. They never modify the five hand-written
+//     fixtures, so every chunk id below still points at the same text.
+//   * rerank_lift is embedder-dependent, not a constant. Measured on the same
+//     169 chunks: bge-m3 retrieves 0.781 and rerank lifts it 0.168; NVIDIA's
+//     nemotron-embed retrieves 0.913 and lifts it 0.036. Both finish at nDCG
+//     0.9490. A small lift can mean a strong embedder rather than a weak
+//     reranker, so read the two numbers together or neither. The committed
+//     baseline is the NVIDIA one, because that is what CI runs.
+//
+// For reference, the lift this replaced: on the original 25-chunk corpus it
+// was 0.000 exactly — reranking changed nothing the gate could see. It is now
+// 0.168 under the same embedder used to measure the real 300-chunk corpus,
+// where the figure is 0.164.
 
 // --- sparse leg: exact identifiers, which pure vector search gets wrong ---
 {"id": "ci-code-4412", "query": "ORB-4412", "relevant_chunk_ids": ["error-codes.csv#0"], "stage": "retrieval", "answer_contains": "Reissue the token with an explicit tag list"}

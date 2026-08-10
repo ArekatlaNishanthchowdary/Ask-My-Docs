@@ -113,6 +113,23 @@ func (a *App) Query(ctx context.Context, req QueryRequest) (QueryResponse, error
 	top = kept
 	resp.Sources = top
 
+	// ABLATE=generate stops here, with the sources retrieved but no answer
+	// written. Recall, nDCG and MRR are computed from resp.Sources and are
+	// already final at this point — everything below only shapes prose — so this
+	// scores retrieval for the cost of an embedding and a rerank, both of which
+	// can run locally. That is what makes it affordable to iterate on a golden
+	// set, a chunk size or a fusion weight without spending generation tokens
+	// per item: at corpus scale it decides whether retrieval gets measured
+	// regularly or measured once.
+	//
+	// Citation and answer metrics are meaningless in this mode, by construction.
+	// ReportItems marks the rows so a 0.00 there is not read as a regression.
+	if a.off("generate") {
+		resp.Answer = insufficientAnswer
+		resp.Timings.Total = ms(start)
+		return resp, nil
+	}
+
 	t = time.Now()
 	ans, err := a.llm().Answer(ctx, req.Question, top)
 	if err != nil {

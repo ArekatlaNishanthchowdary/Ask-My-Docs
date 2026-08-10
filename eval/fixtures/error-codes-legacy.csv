@@ -1,0 +1,33 @@
+code,component,meaning,first action
+ORB-1003,ingest,Payload accepted but its declared encoding did not match the sniffed type,Re-submit with an explicit content-type header
+ORB-1010,ingest,Upload stream closed before the declared length was reached,Retry the upload; partial objects are discarded automatically
+ORB-1017,ingest,Manifest referenced a part that was never uploaded,Re-upload the missing part before finalising
+ORB-1024,ingest,Payload checksum matched but the archive index was unreadable,Rebuild the archive locally and re-upload
+ORB-1031,ingest,Declared size was below the minimum for a multipart upload,Send it as a single-part upload instead
+ORB-2203,scheduler,Job was placed on a worker that drained before it started,Requeue the job; placement is not sticky
+ORB-2210,scheduler,Placement window expired while the pool was scaling up,Widen the window or pre-warm the pool
+ORB-2217,scheduler,Job requested an affinity tag no worker advertises,Correct the tag; unmatched affinity never falls back
+ORB-2224,scheduler,Two placements raced and the later one won,No action; the earlier result is discarded by design
+ORB-2231,scheduler,Worker accepted the job then failed its readiness probe,Investigate the worker before returning it to the pool
+ORB-3003,storage,Read quorum not reached on a secondary replica,Retry against the primary; secondaries lag under load
+ORB-3017,storage,Compaction lagged far enough to reject new writes,Wait for compaction; writes resume without intervention
+ORB-3024,storage,Key existed but its value failed a checksum on read,Escalate with the key; the replica needs rebuilding
+ORB-3031,storage,Snapshot referenced a segment removed by retention,Restore from an older snapshot instead
+ORB-3038,storage,Write succeeded on the primary but no replica acknowledged,Treat the write as lost and re-issue it
+ORB-4403,auth,Bearer token carried permission tags that no longer exist,Reissue the token against the current tag list
+ORB-4410,auth,Bearer token was well formed but had already been revoked,Issue a fresh token; revocation is immediate
+ORB-4417,auth,Token carried permission tags but none matched the resource,Grant the resource tag explicitly; wildcards are not expanded
+ORB-4424,auth,Token was valid but presented over an untrusted transport,Re-issue the request over TLS; the token is now burned
+ORB-4431,auth,Token signature verified but its audience claim was wrong,Request a token scoped to this service
+ORB-4438,auth,Token was valid but its permission tags were empty after filtering,Check the group mapping; filtered tags fail closed
+ORB-5003,billing,Usage record arrived twice for the same metering window,No action; duplicates are collapsed on the record id
+ORB-5010,billing,Invoice total disagreed with the sum of its line items,Refuse the invoice and re-run aggregation
+ORB-5017,billing,Currency conversion succeeded against a deprecated rate table,Refresh the table; deprecated rates expire in 30 days
+ORB-5024,billing,Usage arrived for a tenant closed mid-period,Record is held for manual review
+ORB-5031,billing,Discount applied after tax rather than before it,Re-issue the invoice; ordering is not adjustable
+ORB-6210,telemetry,Metric cardinality approached but did not exceed the tenant limit,Reduce labels proactively; no data has been dropped
+ORB-6217,telemetry,Exporter was re-enabled before the offending label was removed,Remove the label first; re-enabling alone loops
+ORB-6224,telemetry,Metric was dropped because its name collided with a reserved prefix,Rename the metric; reserved prefixes are not configurable
+ORB-6231,telemetry,Trace was sampled in but its parent span was missing,Fix the propagation header at the caller
+ORB-6238,telemetry,Histogram bucket boundaries changed mid-series,Start a new series; buckets cannot be migrated in place
+ORB-6245,telemetry,Per-tenant limit was raised but the exporter cached the old value,Restart the exporter to pick up the new limit

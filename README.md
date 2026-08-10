@@ -804,6 +804,27 @@ that stage's contribution on **your** corpus. Unknown stage names are rejected
 at startup — a typo that silently measures the full pipeline and reports it as
 an ablation is worse than a crash, because it produces a table that looks real.
 
+`ABLATE=generate` is the one rung that is about cost rather than quality. It
+stops after retrieval and reranking, so recall, nDCG and MRR come out
+identical — they are computed from the retrieved sources, which are already
+final at that point — while no generation token is spent at all:
+
+```bash
+ABLATE=generate ./ask-my-docs eval -judge=false
+```
+
+Measured here on the 33-item set: identical retrieval metrics to the full run,
+33 items in 24 seconds instead of minutes, and nothing billed. That difference
+is what decides whether retrieval gets measured on every change or measured
+once a quarter, and at corpus scale it is the difference between tuning chunk
+size and guessing at it.
+
+Citation and answer metrics report 0 in this mode by construction, not by
+regression — so this is a tool for iterating, never for gating. Running it
+against a baseline that includes generation fails the gate immediately, which
+is the intended behaviour: a build must not go green by skipping the expensive
+half of the pipeline.
+
 Two honest limits:
 
 - **Deltas smaller than `1/N` are noise.** With 33 items scoring 0, 0.5 or 1.0,

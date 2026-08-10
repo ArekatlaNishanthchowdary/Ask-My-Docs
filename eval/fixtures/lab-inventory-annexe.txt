@@ -1,0 +1,97 @@
+Orbital Dynamics - Annexe Bench Inventory (fictional)
+
+Bench 3 (annexe)
+  1x  Signal generator SG-4200, serial RF-00513
+  1x  Signal generator SG-4200, serial RF-00526
+  1x  Signal generator SG-4200, serial RF-00539
+  Calibration due: bench 3 is recertified every 15 months
+
+Bench 4 (annexe)
+  1x  Spectrum analyser SA-2050, serial RF-00552
+  1x  Spectrum analyser SA-2050, serial RF-00565
+  1x  Spectrum analyser SA-2050, serial RF-00578
+  Calibration due: bench 4 is recertified every 16 months
+
+Bench 5 (annexe)
+  1x  Vector network analyser VNA-8720, serial RF-00591
+  1x  Vector network analyser VNA-8720, serial RF-00604
+  1x  Vector network analyser VNA-8720, serial RF-00617
+  Calibration due: bench 5 is recertified every 17 months
+
+Bench 6 (annexe)
+  1x  Oscilloscope DSO-6104, serial RF-00630
+  1x  Oscilloscope DSO-6104, serial RF-00643
+  1x  Oscilloscope DSO-6104, serial RF-00656
+  Calibration due: bench 6 is recertified every 12 months
+
+Bench 7 (annexe)
+  1x  Logic analyser LA-1670, serial RF-00669
+  1x  Logic analyser LA-1670, serial RF-00682
+  1x  Logic analyser LA-1670, serial RF-00695
+  Calibration due: bench 7 is recertified every 13 months
+
+Bench 8 (annexe)
+  1x  Power meter PM-4419, serial RF-00708
+  1x  Power meter PM-4419, serial RF-00721
+  1x  Power meter PM-4419, serial RF-00734
+  Calibration due: bench 8 is recertified every 14 months
+
+Bench 9 (annexe)
+  1x  Frequency counter FC-5335, serial RF-00747
+  1x  Frequency counter FC-5335, serial RF-00760
+  1x  Frequency counter FC-5335, serial RF-00773
+  Calibration due: bench 9 is recertified every 15 months
+
+Bench 10 (annexe)
+  1x  Noise figure meter NFM-8970, serial RF-00786
+  1x  Noise figure meter NFM-8970, serial RF-00799
+  1x  Noise figure meter NFM-8970, serial RF-00812
+  Calibration due: bench 10 is recertified every 16 months
+
+Bench 11 (annexe)
+  1x  Arbitrary waveform generator AWG-3252, serial RF-00825
+  1x  Arbitrary waveform generator AWG-3252, serial RF-00838
+  1x  Arbitrary waveform generator AWG-3252, serial RF-00851
+  Calibration due: bench 11 is recertified every 17 months
+
+Bench 12 (annexe)
+  1x  Bench multimeter DMM-3458, serial RF-00864
+  1x  Bench multimeter DMM-3458, serial RF-00877
+  1x  Bench multimeter DMM-3458, serial RF-00890
+  Calibration due: bench 12 is recertified every 12 months
+
+Bench 13 (annexe)
+  1x  DC power supply PSU-6632, serial RF-00903
+  1x  DC power supply PSU-6632, serial RF-00916
+  1x  DC power supply PSU-6632, serial RF-00929
+  Calibration due: bench 13 is recertified every 13 months
+
+Bench 14 (annexe)
+  1x  Electronic load LOAD-6060, serial RF-00942
+  1x  Electronic load LOAD-6060, serial RF-00955
+  1x  Electronic load LOAD-6060, serial RF-00968
+  Calibration due: bench 14 is recertified every 14 months
+
+Bench 15 (annexe)
+  1x  Temperature chamber TC-9023, serial RF-00981
+  1x  Temperature chamber TC-9023, serial RF-00994
+  1x  Temperature chamber TC-9023, serial RF-01007
+  Calibration due: bench 15 is recertified every 15 months
+
+Bench 16 (annexe)
+  1x  Vibration table VT-4410, serial RF-01020
+  1x  Vibration table VT-4410, serial RF-01033
+  1x  Vibration table VT-4410, serial RF-01046
+  Calibration due: bench 16 is recertified every 16 months
+
+Bench 17 (annexe)
+  1x  Vacuum pump VP-1400, serial RF-01059
+  1x  Vacuum pump VP-1400, serial RF-01072
+  1x  Vacuum pump VP-1400, serial RF-01085
+  Calibration due: bench 17 is recertified every 17 months
+
+Bench 18 (annexe)
+  1x  Thermal camera TCAM-7800, serial RF-01098
+  1x  Thermal camera TCAM-7800, serial RF-01111
+  1x  Thermal camera TCAM-7800, serial RF-01124
+  Calibration due: bench 18 is recertified every 12 months
