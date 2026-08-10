@@ -4,6 +4,11 @@ on:
   pull_request:
   push:
     branches: [main]
+  # The gate depends on repository secrets and on two service containers, none
+  # of which are part of a commit. When one of those changes -- a key added or
+  # rotated, a quota restored -- the answer to "does the gate pass now" should
+  # not require an empty commit to ask.
+  workflow_dispatch:
 
 jobs:
   # Unit tests plus the Qdrant wire-format integration tests, which use
