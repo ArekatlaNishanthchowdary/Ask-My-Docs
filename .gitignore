@@ -27,3 +27,4 @@ eval/ablation.json
 # Runtime logs
 *.log
 serve.err
+askmydocs.exe
