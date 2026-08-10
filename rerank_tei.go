@@ -82,8 +82,27 @@ func (t *TEIReranker) Rerank(ctx context.Context, query string, docs []string, t
 
 func (t *TEIReranker) rerankBatch(ctx context.Context, query string, docs []string) ([]Scored, error) {
 	body, err := json.Marshal(map[string]any{
-		"query":      query,
-		"texts":      docs,
+		"query": query,
+		"texts": docs,
+		// Truncate rather than 413. A cross-encoder has a fixed maximum
+		// sequence length and TEI rejects the whole batch when one pair
+		// exceeds it:
+		//
+		//   `inputs` must have less than 512 tokens. Given: 513
+		//
+		// Most cross-encoders are 512-token models. bge-reranker-v2-m3 takes
+		// 8192, which is the only reason this was not a permanent outage: a
+		// MAX_CHUNK_CHARS of 1600 lands just past 512 tokens once the query
+		// and the context line are added, so the failure needs a long chunk
+		// AND a normal-length model, and development used the long one.
+		//
+		// Losing the tail of an over-long passage is the right trade. The
+		// alternative is no score at all, and Rerank's error fails the whole
+		// query — it does not degrade to fusion order. A relevance signal
+		// computed from the first 512 tokens beats no relevance signal, and
+		// the full text is still what gets cited and quoted downstream: this
+		// truncation is scoped to the scoring request.
+		"truncate":   true,
 		"raw_scores": false, // sigmoid-normalised to 0..1, so MIN_RERANK_SCORE is comparable
 	})
 	if err != nil {
