@@ -587,11 +587,38 @@ func loadDotEnv(path string) {
 			continue
 		}
 		k = strings.TrimSpace(k)
-		v = strings.Trim(strings.TrimSpace(v), `"'`)
+		v = strings.Trim(strings.TrimSpace(dropInlineComment(v)), `"'`)
 		if _, set := os.LookupEnv(k); !set && k != "" {
 			_ = os.Setenv(k, v)
 		}
 	}
+}
+
+// dropInlineComment removes a trailing `# ...` from a .env value.
+//
+// Every commented example in .env.example carries its options inline —
+// `OPENAI_REASONING_EFFORT=low   # reasoning models only` — so uncommenting one
+// used to set the value to "low   # reasoning models only", which the provider
+// rejects with a 400 naming a value that looks correct in the file. The failure
+// points at the setting rather than at the parser, which is what made it cost
+// an afternoon.
+//
+// Only whitespace-then-# starts a comment, so a value that legitimately
+// contains one (`pass#word`) survives. A quoted value is taken verbatim: that
+// is the escape hatch for a value that really does end in " #".
+func dropInlineComment(v string) string {
+	if v = strings.TrimSpace(v); strings.HasPrefix(v, `"`) || strings.HasPrefix(v, `'`) {
+		if end := strings.IndexByte(v[1:], v[0]); end >= 0 {
+			return v[:end+2]
+		}
+		return v
+	}
+	for i := 1; i < len(v); i++ {
+		if v[i] == '#' && (v[i-1] == ' ' || v[i-1] == '\t') {
+			return strings.TrimRight(v[:i], " \t")
+		}
+	}
+	return v
 }
 
 // version is stamped by the release workflow with -X main.version=<tag>. A
