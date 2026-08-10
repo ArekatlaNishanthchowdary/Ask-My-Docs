@@ -112,6 +112,14 @@ jobs:
       PROVIDER: nvidia
       LLM_PROVIDER: nvidia
       NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+      # No default exists for this on purpose — running against a model nobody
+      # chose is worse than a startup error naming the variable — so the gate
+      # has to name it, and pin it, or the baseline drifts with the provider's
+      # idea of "latest".
+      NVIDIA_MODEL: meta/llama-3.1-70b-instruct
+      # A verifier that is the model which wrote the claim is the weakest form
+      # of a check whose entire purpose is independence.
+      VERIFY_MODEL: minimaxai/minimax-m3
       QDRANT_URL: http://localhost:6333
       QDRANT_COLLECTION: ci_fixtures
       QDRANT_CACHE_COLLECTION: ci_cache
@@ -213,8 +221,19 @@ jobs:
           echo "::endgroup::"
           echo "::error::reranker did not become ready in 15 minutes"; exit 1
 
+      # CONTEXT_PROVIDER=none is what makes this index reproducible. With it
+      # unset, ingest asks the model to write a context line per chunk batch and
+      # bakes that text into the vectors — so a re-run indexes different vectors
+      # for identical inputs, retrieval scores move on their own, and a gate
+      # comparing against a fixed baseline is measuring sampling noise. The
+      # derived context (filename plus heading path) is deterministic.
+      #
+      # It is also the expensive half of ingest: contextualization measured
+      # >95% of the wall clock on a 780-chunk document.
       - name: Index the fixtures
         if: steps.gate.outputs.run == 'true'
+        env:
+          CONTEXT_PROVIDER: none
         run: ./ask-my-docs ingest -dir eval/fixtures
 
       # Fails the build if a gated metric regresses past the tolerance against
