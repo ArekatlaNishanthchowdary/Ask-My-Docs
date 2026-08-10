@@ -37,6 +37,19 @@
 // was 0.000 exactly — reranking changed nothing the gate could see. It is now
 // 0.168 under the same embedder used to measure the real 300-chunk corpus,
 // where the figure is 0.164.
+//
+// READ ci-baseline.json IN THAT LIGHT. It is recorded by CI, in CI, and CI
+// runs bge-reranker-base rather than the bge-reranker-v2-m3 used everywhere
+// else — TEI's CPU image has only an ONNX backend and v2-m3 ships no ONNX
+// weights, so the container cannot start. On that model the recorded lift is
+// NEGATIVE (-0.103): reranking costs more than it returns, because 50
+// candidates are reordered and cut to 10 and a weak cross-encoder drops
+// chunks plain fusion had ranked inside the window.
+//
+// So the committed baseline is a tripwire for regressions in this
+// repository's code, measured against itself under one fixed configuration.
+// It is not this pipeline's retrieval quality and must never be quoted as
+// such. The quality figures live in the README and come from the local stack.
 
 // --- sparse leg: exact identifiers, which pure vector search gets wrong ---
 {"id": "ci-code-4412", "query": "ORB-4412", "relevant_chunk_ids": ["error-codes.csv#0"], "stage": "retrieval", "answer_contains": "Reissue the token with an explicit tag list"}
