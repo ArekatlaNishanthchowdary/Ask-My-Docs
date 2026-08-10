@@ -143,9 +143,24 @@ Honest caveats, because a benchmark table without them is marketing:
 | **Go 1.25+** | building | Three direct modules: `golang.org/x/sync`, a PDF reader, and the Anthropic SDK. Everything else is standard library. |
 | **Docker** | Qdrant + reranker | `docker compose up -d` starts both. |
 | **Ollama** | the fully-local path | Optional if you use hosted providers for everything except reranking. |
-| **~2GB VRAM or CPU** | the reranker | `bge-reranker-v2-m3` behind TEI. A CPU image is the default. |
+| **~2GB VRAM or CPU** | the reranker | `bge-reranker-v2-m3` behind TEI on a GPU image. **On the CPU image also set `RERANKER_MODEL=BAAI/bge-reranker-base`** — see below. |
 
 No API key is required for the fully-local path.
+
+> [!IMPORTANT]
+> **CPU reranking needs an ONNX model.** TEI's CPU image ships only an ONNX
+> backend, and `bge-reranker-v2-m3` publishes safetensors only, so the
+> container downloads weights for a minute and then exits with `Could not
+> start ORT backend`. The GPU images have a Candle backend and serve it fine,
+> which is why this only bites machines without a GPU:
+>
+> ```bash
+> RERANKER_MODEL=BAAI/bge-reranker-base docker compose up -d
+> ```
+>
+> That model is the weaker one — on the fixture corpus it measures *below* no
+> reranking at all — so it is not the default. A loud failure pointing at this
+> paragraph beats silently downgrading retrieval for everyone with a GPU.
 
 ## Install
 

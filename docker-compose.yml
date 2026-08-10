@@ -26,6 +26,24 @@ services:
   # actually pass the device through, and writes TEI_IMAGE and COMPOSE_FILE
   # into .env so `docker compose up -d` layers docker-compose.gpu.yml on top.
   #
+  # !! ON THE CPU IMAGE, SET RERANKER_MODEL=BAAI/bge-reranker-base !!
+  #
+  # The two defaults below do not work together, and the failure is quiet: the
+  # CPU image has only an ONNX backend, the default model publishes safetensors
+  # only, and the container exits with
+  #
+  #   Could not start ORT backend: File at `.../onnx/model.onnx` does not exist
+  #
+  # after a healthy-looking minute of downloading weights it cannot use. The GPU
+  # images carry a Candle backend and serve the default model fine, which is why
+  # this is easy to miss — it only bites machines without a GPU.
+  #
+  # Not defaulted to the ONNX model because it is the weaker one, and measurably:
+  # on this project's fixture corpus bge-reranker-base scores BELOW no reranking
+  # at all (rerank_lift -0.063 against +0.036 for v2-m3). A silent downgrade of
+  # retrieval quality for everyone with a GPU is the worse default; a loud
+  # failure for CPU users pointed at this line is the better one.
+  #
   # Doing it by hand instead: set TEI_IMAGE and add -f docker-compose.gpu.yml.
   # A mismatched tag fails at startup with "Runtime compute cap N is not
   # compatible", which is at least loud:
