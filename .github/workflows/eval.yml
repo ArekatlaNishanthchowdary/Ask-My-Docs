@@ -61,11 +61,53 @@ jobs:
       # Without a cross-encoder the reranker falls back to an LLM scoring all 50
       # candidates, which is both slower and far more expensive per run than the
       # rest of the gate put together. CPU image: the runner has no GPU.
+      #
+      # bge-reranker-base here, NOT the bge-reranker-v2-m3 that docker-compose
+      # runs locally, and the difference is forced rather than a preference.
+      # TEI's CPU image has only an ONNX backend, and it fails closed when a
+      # repository ships no ONNX weights:
+      #
+      #   Could not start ORT backend: File at `.../onnx/model.onnx`
+      #   does not exist
+      #
+      # BAAI/bge-reranker-v2-m3 publishes safetensors only, so the container
+      # never became healthy and the job died at "Wait for the reranker" -- for
+      # ten minutes, on every run, once the gate was finally switched on.
+      # bge-reranker-base publishes onnx/model.onnx and starts. Locally the
+      # CUDA image has a Candle backend and serves v2-m3 fine, which is exactly
+      # why this went unnoticed: the CPU path had never once run.
+      #
+      # Consequence to respect: eval/ci-baseline.json is recorded against THIS
+      # model, not the local one. Changing either model means re-recording it.
+      #
+      # And this reranker is genuinely weaker, not merely different. Measured on
+      # the 169-chunk fixture corpus, same embedder, same golden set:
+      #
+      #                      retrieval  final   rerank_lift
+      #   bge-reranker-v2-m3   0.913    0.949      +0.036
+      #   bge-reranker-base    0.877    0.813      -0.063
+      #
+      # A negative lift means reranking actively hurts: CANDIDATE_K=50 is
+      # reordered and then cut to TOP_K=10, so a weak cross-encoder pushes
+      # relevant chunks out of the window that plain fusion had ranked inside
+      # it. The distractors are built to be confusable and this model is not
+      # strong enough to separate them.
+      #
+      # That is tolerable ONLY because of what this gate is for. It is a
+      # tripwire for regressions in THIS repository's code -- fusion, gating,
+      # citation resolution, the TEI client -- measured against a baseline
+      # recorded under the identical configuration. It is not a quality claim,
+      # and these numbers must never be quoted as the pipeline's retrieval
+      # quality. The honest figures come from the local stack, in the README.
+      #
+      # ONNX exports of v2-m3 exist on the Hub from third parties. Pinning
+      # someone else's unaudited weights into CI is a supply-chain decision,
+      # not a convenience one, so it is deliberately not taken here.
       reranker:
         image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.7
         ports: ["8081:80"]
         env:
-          MODEL_ID: BAAI/bge-reranker-v2-m3
+          MODEL_ID: BAAI/bge-reranker-base
     env:
       PROVIDER: nvidia
       LLM_PROVIDER: nvidia
@@ -149,18 +191,27 @@ jobs:
           done
 
       # A service container's health check cannot express "the model finished
-      # downloading", and TEI pulls ~2GB before it serves. Waiting here fails
+      # downloading", and TEI pulls ~1GB before it serves. Waiting here fails
       # with a clear message rather than as a confusing rerank error later.
+      #
+      # On timeout, print the container's own log. Without it the failure reads
+      # as "slow runner, try again" — which is what a genuine misconfiguration
+      # looked like here for an entire debugging session, when the real message
+      # (no ONNX weights, backend refused to start) was sitting in a log nobody
+      # surfaced until the job was already torn down.
       - name: Wait for the reranker
         if: steps.gate.outputs.run == 'true'
         run: |
-          for i in $(seq 1 60); do
+          for i in $(seq 1 90); do
             if curl -sf http://localhost:8081/health >/dev/null; then
               echo "reranker ready after ${i}0s"; exit 0
             fi
             sleep 10
           done
-          echo "::error::reranker did not become ready in 10 minutes"; exit 1
+          echo "::group::reranker container log"
+          docker logs "$(docker ps -aq --filter ancestor=ghcr.io/huggingface/text-embeddings-inference:cpu-1.7 | head -1)" 2>&1 | tail -50 || true
+          echo "::endgroup::"
+          echo "::error::reranker did not become ready in 15 minutes"; exit 1
 
       - name: Index the fixtures
         if: steps.gate.outputs.run == 'true'

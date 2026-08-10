@@ -730,6 +730,33 @@ PROVIDER=nvidia LLM_PROVIDER=nvidia QDRANT_COLLECTION=ci_fixtures \
 > configure an optional secret" trains people to ignore red builds. **Green
 > without the secret means the unit tests passed and nothing else was
 > measured.**
+>
+> ```bash
+> gh secret set NVIDIA_API_KEY          # reads the value from stdin
+> gh workflow run eval.yml              # re-run the gate without a commit
+> ```
+>
+> On a public repository, secrets are withheld from pull requests opened from
+> forks. The gate therefore runs on pushes and on same-repo branches, and skips
+> — visibly, by the same path — on fork PRs. That is GitHub's boundary, not a
+> setting: a fork PR is untrusted code, and handing it a key would let anyone
+> who opens one read it.
+
+> [!WARNING]
+> **CI's numbers are a tripwire, not a quality claim.** The gate runs
+> `BAAI/bge-reranker-base`, not the `bge-reranker-v2-m3` this project uses
+> locally, because TEI's CPU image has only an ONNX backend and v2-m3 ships no
+> ONNX weights — the container never starts. On the fixture corpus that
+> substitution measures **worse than no reranking at all** (`rerank_lift`
+> −0.063, against +0.036 for v2-m3), since a weak cross-encoder reorders 50
+> candidates and the top-10 cut then drops chunks plain fusion had ranked
+> inside it.
+>
+> That is acceptable for what the gate does — catch regressions in *this
+> repository's* code against a baseline recorded under the identical
+> configuration — and unacceptable as a description of retrieval quality. Every
+> quality figure quoted elsewhere in this README comes from the local stack
+> running v2-m3.
 
 Two things are deliberately not gated in CI:
 
