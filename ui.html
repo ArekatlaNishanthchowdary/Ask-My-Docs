@@ -6,206 +6,525 @@
 <title>Ask My Docs</title>
 <style>
   :root {
-    --bg: #fbfbfa;        --panel: #ffffff;     --ink: #1b1b19;
-    --muted: #6b6b66;     --line: #e4e4df;      --accent: #2f6f4e;
-    --accent-soft: #e8f1ec;
-    --warn: #8a6410;      --warn-soft: #fdf4e0;
-    --radius: 10px;
+    --bg: #fafaf9;        --side: #f3f3f0;      --panel: #ffffff;
+    --ink: #171715;       --muted: #74746d;     --faint: #9a9a92;
+    --line: #e6e6e0;      --line-soft: #efefea;
+    --accent: #2f6f4e;    --accent-ink: #245a3f; --accent-soft: #e8f2ec;
+    --warn: #8a6410;      --warn-soft: #fdf5e3;
+    --err: #b0342b;       --err-soft: #fdeceb;
+    --r-lg: 14px;         --r: 10px;            --r-sm: 7px;
+    --shadow: 0 1px 2px rgba(16,16,14,.04), 0 4px 12px -6px rgba(16,16,14,.08);
+
+    /* Curves. The built-in CSS easings are too weak to read as intentional;
+       these are the strong variants (emilkowalski/skills). ease-in is never
+       used on UI — it delays the exact moment the eye is watching. */
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+    --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+    --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #16171a;      --panel: #1e2024;     --ink: #e8e8e4;
-      --muted: #9a9a94;   --line: #2e3138;      --accent: #6fc297;
-      --accent-soft: #1d2b24;
-      --warn: #e0b256;    --warn-soft: #2b2415;
+      --bg: #131418;      --side: #0e0f12;      --panel: #1a1c21;
+      --ink: #eaeae6;     --muted: #90908a;     --faint: #6f6f69;
+      --line: #282b31;    --line-soft: #212429;
+      --accent: #6fc297;  --accent-ink: #8ed3af; --accent-soft: #18261f;
+      --warn: #dcae53;    --warn-soft: #2a2314;
+      --err: #ef8a81;     --err-soft: #2c1917;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 16px -8px rgba(0,0,0,.5);
     }
   }
+
   * { box-sizing: border-box; }
-  /* Smoothness lives in CSS, not in scrollIntoView({behavior:'smooth'}) — the
-     JS flag silently does nothing in some browsers, whereas the CSS property
-     degrades to an instant jump, which is the behaviour that matters. */
-  html { scroll-behavior: smooth; }
-  @media (prefers-reduced-motion: reduce) {
-    html { scroll-behavior: auto; }
-    .src.flash { animation: none; }
-  }
+  html, body { height: 100%; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
-    font: 15px/1.6 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font: 15px/1.6 ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
-  .wrap { max-width: 860px; margin: 0 auto; padding: 28px 20px 80px; }
+  ::selection { background: var(--accent-soft); }
 
-  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
-  h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
-  #status { font-size: 12px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  #status b { color: var(--accent); font-weight: 600; }
+  /* ── App shell ─────────────────────────────────────────────────────────── */
+  .app { display: grid; grid-template-columns: 292px minmax(0, 1fr); height: 100dvh; }
 
-  form { display: flex; gap: 8px; margin-bottom: 8px; }
-  input[type=text] {
-    flex: 1; padding: 11px 13px; font: inherit; color: var(--ink);
-    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  /* ── Sidebar ───────────────────────────────────────────────────────────── */
+  .side {
+    background: var(--side); border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; min-height: 0;
   }
-  input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
-  button {
-    padding: 11px 18px; font: inherit; font-weight: 600; cursor: pointer;
-    color: #fff; background: var(--accent); border: 0; border-radius: var(--radius);
+  .brand { display: flex; align-items: center; gap: 10px; padding: 18px 18px 14px; }
+  .mark {
+    width: 30px; height: 30px; border-radius: 9px; flex: none;
+    background: var(--accent); color: #fff;
+    display: grid; place-items: center;
   }
-  button:disabled { opacity: .55; cursor: default; }
-  .opts { display: flex; gap: 16px; align-items: center; font-size: 13px; color: var(--muted); margin-bottom: 24px; }
-  .opts input[type=text] { flex: 0 1 220px; padding: 6px 9px; font-size: 13px; }
-  .opts label { display: flex; align-items: center; gap: 6px; }
+  @media (prefers-color-scheme: dark) { .mark { color: #0e1a14; } }
+  .brand-name { font-size: 14.5px; font-weight: 650; letter-spacing: -.012em; line-height: 1.2; }
+  .brand-sub { font-size: 11.5px; color: var(--faint); line-height: 1.3; }
+
+  .side-scroll { flex: 1; overflow-y: auto; padding: 0 14px 8px; min-height: 0; }
+  .sec { margin: 18px 4px 8px; display: flex; align-items: baseline; gap: 8px; }
+  .sec h2 {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em;
+    color: var(--faint); margin: 0; font-weight: 650;
+  }
+  .sec .sec-note { font-size: 11px; color: var(--faint); margin-left: auto; }
+
+  .group {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--r); padding: 4px;
+  }
+
+  /* Document rows */
+  .doc {
+    display: flex; align-items: center; gap: 8px; padding: 7px 9px;
+    border-radius: var(--r-sm); font-size: 12.5px;
+    transition: background 140ms ease;
+  }
+  @media (hover: hover) and (pointer: fine) { .doc:hover { background: var(--line-soft); } }
+  .doc-name {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  }
+  .doc-meta { color: var(--faint); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .doc-meta.bad { color: var(--warn); }
+  .empty-note { padding: 10px 9px; font-size: 12.5px; color: var(--faint); }
+
+  .row { display: flex; gap: 6px; margin-top: 8px; }
+  .btn {
+    font: inherit; font-size: 12.5px; font-weight: 550; cursor: pointer;
+    color: var(--ink); background: var(--panel);
+    border: 1px solid var(--line); border-radius: var(--r-sm);
+    padding: 7px 10px; display: inline-flex; align-items: center; gap: 6px;
+    transition: transform 160ms var(--ease-out), background 140ms ease, border-color 140ms ease;
+  }
+  @media (hover: hover) and (pointer: fine) { .btn:hover { background: var(--line-soft); border-color: var(--faint); } }
+  .btn:active { transform: scale(0.97); }
+  .btn:disabled { opacity: .5; cursor: default; transform: none; }
+  .btn.grow { flex: 1; justify-content: center; }
+  .btn:focus-visible, .field:focus-visible, .cite:focus-visible, .switch:focus-within,
+  .sel:focus-visible, .send:focus-visible, .chip:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+
+  .hint { font-size: 11.5px; color: var(--faint); margin: 8px 4px 0; line-height: 1.45; }
+
+  /* Pipeline selects */
+  .stage { display: flex; align-items: center; gap: 8px; padding: 6px 8px; }
+  .stage label { font-size: 12px; color: var(--muted); width: 58px; flex: none; }
+  .sel {
+    flex: 1; min-width: 0; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: var(--r-sm); padding: 5px 6px;
+    transition: border-color 140ms ease;
+  }
+  .sel:disabled { opacity: .55; }
+
+  /* Options */
+  .field {
+    width: 100%; font: inherit; font-size: 12.5px; color: var(--ink);
+    background: var(--bg); border: 1px solid var(--line);
+    border-radius: var(--r-sm); padding: 7px 9px;
+    transition: border-color 140ms ease;
+  }
+  .field::placeholder { color: var(--faint); }
+  /* Chrome paints autofilled inputs with its own opaque background, which turns
+     a dark control white and unreadable. It cannot be overridden by `background`
+     — only by an inset shadow large enough to cover the field. */
+  .field:-webkit-autofill, .field:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--ink);
+    box-shadow: 0 0 0 100px var(--bg) inset;
+    caret-color: var(--ink);
+  }
+  .opt { padding: 8px 9px; }
+  .opt + .opt { border-top: 1px solid var(--line-soft); }
+  .opt-label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 6px; }
+
+  .switch { display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: pointer; }
+  .switch input { position: absolute; opacity: 0; pointer-events: none; }
+  .track {
+    width: 32px; height: 18px; flex: none; border-radius: 999px;
+    background: var(--line); border: 1px solid transparent; position: relative;
+    transition: background 160ms ease;
+  }
+  .track::after {
+    content: ""; position: absolute; inset: 2px auto 2px 2px; width: 12px;
+    border-radius: 999px; background: var(--panel); box-shadow: 0 1px 2px rgba(0,0,0,.18);
+    transition: transform 180ms var(--ease-out);
+  }
+  .switch input:checked + .track { background: var(--accent); }
+  .switch input:checked + .track::after { transform: translateX(14px); }
+
+  /* Sidebar footer: what is actually running */
+  .side-foot { border-top: 1px solid var(--line); padding: 12px 18px 14px; }
+  /* Grid, not flex: a <dl> laid out with flex puts every dt/dd on one line,
+     which reads as a row of labels with no values. */
+  .stat { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 0 8px;
+          margin: 0; font-size: 11.5px; line-height: 1.9; }
+  .stat dt { color: var(--faint); }
+  .stat dd {
+    margin: 0; min-width: 0; color: var(--muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .stat dd b { color: var(--accent); font-weight: 600; }
+  #tokenbox { margin-top: 10px; }
+
+  /* ── Main column ───────────────────────────────────────────────────────── */
+  .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .topbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 20px; border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+    backdrop-filter: blur(8px);
+  }
+  .topbar h1 { font-size: 14px; font-weight: 600; margin: 0; letter-spacing: -.01em; }
+  .pill {
+    margin-left: auto; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--muted); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px;
+    display: inline-flex; align-items: center; gap: 7px;
+  }
+  .dot { width: 6px; height: 6px; border-radius: 999px; background: var(--accent); flex: none; }
+  .dot.down { background: var(--err); }
+  .burger { display: none; }
+
+  .thread { flex: 1; overflow-y: auto; padding: 26px 20px 8px; scroll-behavior: smooth; }
+  .thread-inner { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px; }
+
+  /* Messages. @starting-style animates the entrance with no JS mount flag;
+     browsers without it simply show the message, which is the right fallback. */
+  .msg {
+    opacity: 1; transform: translateY(0);
+    transition: opacity 320ms var(--ease-out), transform 320ms var(--ease-out);
+  }
+  @starting-style { .msg { opacity: 0; transform: translateY(10px); } }
+
+  .msg.me { display: flex; justify-content: flex-end; }
+  .msg.me p {
+    margin: 0; max-width: 84%; padding: 10px 14px;
+    background: var(--accent-soft); color: var(--accent-ink);
+    border-radius: var(--r-lg) var(--r-lg) 4px var(--r-lg);
+    font-size: 14.5px; white-space: pre-wrap; overflow-wrap: anywhere;
+  }
 
   .card {
     background: var(--panel); border: 1px solid var(--line);
-    border-radius: var(--radius); padding: 18px 20px; margin-bottom: 14px;
+    border-radius: var(--r-lg); box-shadow: var(--shadow);
   }
-  .answer { font-size: 16px; line-height: 1.75; }
-  .answer p { margin: 0 0 10px; }
+  .answer { padding: 18px 20px; font-size: 15.5px; line-height: 1.72; }
+  .answer p { margin: 0 0 12px; }
   .answer p:last-child { margin-bottom: 0; }
+  .refusal { color: var(--muted); font-style: italic; }
+  .err-text { color: var(--err); }
 
-  /* Citation chips are the point of the whole system — make them the most
-     clickable thing on the page. */
+  /* Citation chips are the point of the whole system — the most clickable
+     thing on the page. */
   .cite {
-    display: inline-block; margin-left: 4px; padding: 1px 7px;
+    display: inline-block; margin-left: 5px; padding: 1px 8px;
     font: 600 11px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace;
     color: var(--accent); background: var(--accent-soft);
-    border: 1px solid transparent; border-radius: 20px;
+    border: 1px solid transparent; border-radius: 999px;
     cursor: pointer; vertical-align: baseline; white-space: nowrap;
+    transition: transform 160ms var(--ease-out), border-color 140ms ease;
   }
-  .cite:hover, .cite:focus { border-color: var(--accent); outline: none; }
-
-  .refusal { color: var(--muted); font-style: italic; }
+  @media (hover: hover) and (pointer: fine) { .cite:hover { border-color: var(--accent); } }
+  .cite:active { transform: scale(0.94); }
 
   .banner {
-    background: var(--warn-soft); color: var(--warn); border: 1px solid currentColor;
-    border-radius: var(--radius); padding: 10px 14px; margin-bottom: 14px; font-size: 13px;
+    margin: 0; padding: 12px 20px; font-size: 12.5px; line-height: 1.6;
+    color: var(--warn); background: var(--warn-soft);
+    border-bottom: 1px solid color-mix(in srgb, var(--warn) 24%, transparent);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
   }
-  .banner ul { margin: 6px 0 0; padding-left: 18px; }
-
-  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em;
-       color: var(--muted); margin: 26px 0 10px; font-weight: 600; }
-
-  .src { border: 1px solid var(--line); border-radius: var(--radius);
-         padding: 12px 14px; margin-bottom: 8px; background: var(--panel); }
-  .src.flash { animation: flash 1.4s ease-out; }
-  @keyframes flash {
-    0%, 30% { border-color: var(--accent); background: var(--accent-soft); }
-    100% { border-color: var(--line); background: var(--panel); }
-  }
-  .src-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
-  .src-id { font: 600 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); }
-  .src-sec { font-size: 12px; color: var(--muted); flex: 1; min-width: 0;
-             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .score { font: 11px ui-monospace, monospace; color: var(--muted); }
-  .bar { width: 46px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
-  .bar i { display: block; height: 100%; background: var(--accent); }
-  .src-text { font-size: 13.5px; color: var(--ink); opacity: .82; white-space: pre-wrap; margin: 0; }
+  .banner strong { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .07em; margin-bottom: 4px; }
+  .banner ul { margin: 0; padding-left: 17px; }
 
   /* Stage timings — the thing that made every optimisation in this project
      legible, so it belongs in the UI rather than only in the CLI. */
-  .timings { display: flex; gap: 3px; margin-bottom: 6px; }
-  .timings div { height: 6px; border-radius: 2px; min-width: 2px; }
-  .tlegend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted);
-             font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .meta { border-top: 1px solid var(--line-soft); padding: 12px 20px; }
+  .timings { display: flex; gap: 3px; height: 6px; margin-bottom: 9px; }
+  .timings div { border-radius: 2px; min-width: 3px; }
+  .tlegend {
+    display: flex; gap: 6px 15px; flex-wrap: wrap; align-items: center;
+    font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted);
+  }
   .tlegend span::before {
-    content: ""; display: inline-block; width: 8px; height: 8px;
-    border-radius: 2px; background: currentColor; margin-right: 5px;
+    content: ""; display: inline-block; width: 7px; height: 7px;
+    border-radius: 2px; background: currentColor; margin-right: 6px; vertical-align: 1px;
   }
-  /* Add-documents affordance. Deliberately quiet until you drag something. */
-  .docs { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-          font-size: 13px; color: var(--muted); margin-bottom: 24px; }
-  .linkbtn { background: none; border: 0; padding: 0; font: inherit; font-weight: 600;
-             color: var(--accent); cursor: pointer; text-decoration: underline; }
-  .linkbtn:disabled { opacity: .55; cursor: default; }
-  .chipfile { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
-              background: var(--accent-soft); color: var(--accent);
-              padding: 2px 8px; border-radius: 20px; }
-  .chipfile.bad { background: var(--warn-soft); color: var(--warn); }
+  .tlegend .total { margin-left: auto; color: var(--ink); font-weight: 600; }
+  .tlegend .total::before { display: none; }
+  .cachehit { color: var(--accent); }
+  .cachehit::before { background: var(--accent) !important; }
 
-  .stages { display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
-            margin: 0 0 22px; font-size: 12px; color: var(--muted); }
-  .stage { display: flex; align-items: center; gap: 6px; }
-  .stage label { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .stage select {
-    font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
-    color: var(--ink); background: var(--panel);
-    border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; max-width: 260px;
+  /* Sources — a disclosure, not a wall. Native <details> keeps it keyboard
+     accessible for free. */
+  .srcs { border-top: 1px solid var(--line-soft); }
+  .srcs > summary {
+    list-style: none; cursor: pointer; padding: 11px 20px;
+    font-size: 12px; color: var(--muted);
+    display: flex; align-items: center; gap: 8px;
+    transition: color 140ms ease;
   }
-  .stage select:disabled { opacity: .6; }
-  .stage-note { font-size: 11.5px; opacity: .8; }
+  .srcs > summary::-webkit-details-marker { display: none; }
+  @media (hover: hover) and (pointer: fine) { .srcs > summary:hover { color: var(--ink); } }
+  .caret { transition: transform 200ms var(--ease-out); flex: none; }
+  .srcs[open] .caret { transform: rotate(90deg); }
+  .srcs-body { padding: 2px 14px 14px; display: flex; flex-direction: column; gap: 6px; }
 
-  #doclist { margin: -14px 0 24px; }
-  .doc { display: flex; align-items: baseline; gap: 10px; padding: 5px 0;
-         border-bottom: 1px solid var(--line); font-size: 13px; }
-  .doc:last-child { border-bottom: 0; }
-  .doc-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-              white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .doc-meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
-  .doc-meta.bad { color: var(--warn); }
+  .src {
+    border: 1px solid var(--line); border-radius: var(--r);
+    padding: 11px 13px; background: var(--bg);
+    transition: border-color 240ms var(--ease-out), background 240ms var(--ease-out);
+  }
+  .src.flash { border-color: var(--accent); background: var(--accent-soft); }
+  .src-head { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+  .src-id { font: 600 11.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); flex: none; }
+  .src-sec { font-size: 11.5px; color: var(--faint); flex: 1; min-width: 0;
+             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar { width: 44px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; flex: none; }
+  .bar i { display: block; height: 100%; background: var(--accent); }
+  .score { font: 11px ui-monospace, monospace; color: var(--faint); flex: none; font-variant-numeric: tabular-nums; }
+  .src-text { font-size: 13px; line-height: 1.6; color: var(--muted); white-space: pre-wrap;
+              margin: 0; max-height: 190px; overflow: auto; overflow-wrap: anywhere; }
 
-  /* Full-window drop target: dragging a file anywhere should work, because
-     aiming at a small rectangle is the annoying part of file uploads. */
+  /* Loading skeleton. Opacity only — it breathes without costing layout. */
+  .skel { padding: 18px 20px; }
+  .skel i {
+    display: block; height: 11px; border-radius: 999px; background: var(--line);
+    margin-bottom: 10px; animation: breathe 1.4s ease-in-out infinite;
+  }
+  .skel i:nth-child(2) { animation-delay: .12s; width: 92%; }
+  .skel i:nth-child(3) { animation-delay: .24s; width: 64%; margin-bottom: 14px; }
+  @keyframes breathe { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+  .skel-label { font-size: 12px; color: var(--faint); }
+
+  /* Empty state */
+  .empty { max-width: 560px; margin: 6vh auto 0; text-align: center; }
+  .empty h2 { font-size: 20px; font-weight: 600; letter-spacing: -.02em; margin: 0 0 8px; }
+  .empty p { color: var(--muted); font-size: 14px; margin: 0 auto 22px; max-width: 44ch; }
+  .flow { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap;
+          font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .flow b { font-weight: 500; padding: 3px 9px; border-radius: 999px;
+            border: 1px solid currentColor; opacity: .9; }
+  .flow s { text-decoration: none; color: var(--faint); }
+
+  /* Composer */
+  .composer { padding: 12px 20px 20px; }
+  .composer form {
+    max-width: 760px; margin: 0 auto; display: flex; align-items: flex-end; gap: 8px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--r-lg); padding: 8px 8px 8px 14px; box-shadow: var(--shadow);
+    transition: border-color 160ms ease;
+  }
+  .composer form:focus-within { border-color: var(--accent); }
+  #q {
+    flex: 1; border: 0; outline: none; resize: none; background: none;
+    font: inherit; color: var(--ink); padding: 8px 0; max-height: 168px; line-height: 1.55;
+  }
+  #q::placeholder { color: var(--faint); }
+  .send {
+    flex: none; width: 34px; height: 34px; border: 0; border-radius: var(--r);
+    background: var(--accent); color: #fff; cursor: pointer;
+    display: grid; place-items: center;
+    transition: transform 160ms var(--ease-out), opacity 140ms ease;
+  }
+  @media (prefers-color-scheme: dark) { .send { color: #0e1a14; } }
+  .send:active { transform: scale(0.94); }
+  .send:disabled { opacity: .45; cursor: default; transform: none; }
+  .composer .foot { max-width: 760px; margin: 8px auto 0; font-size: 11px; color: var(--faint); text-align: center; }
+  kbd { font: inherit; font-size: 10.5px; border: 1px solid var(--line); border-bottom-width: 2px;
+        border-radius: 4px; padding: 0 4px; color: var(--muted); }
+
+  /* Full-window drop target: aiming at a small rectangle is the annoying part
+     of file uploads. */
   #drop {
-    position: fixed; inset: 0; z-index: 10; display: none;
-    align-items: center; justify-content: center;
-    background: color-mix(in srgb, var(--bg) 88%, transparent);
-    border: 3px dashed var(--accent); font-size: 18px; font-weight: 600; color: var(--accent);
+    position: fixed; inset: 0; z-index: 40; display: grid; place-items: center;
+    background: color-mix(in srgb, var(--bg) 86%, transparent);
+    opacity: 0; visibility: hidden; transform: scale(1.01);
+    transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out), visibility 180ms;
   }
-  #drop.on { display: flex; }
+  #drop.on { opacity: 1; visibility: visible; transform: scale(1); }
+  #drop div {
+    border: 2px dashed var(--accent); border-radius: 18px; padding: 40px 52px;
+    color: var(--accent); font-size: 16px; font-weight: 600; text-align: center;
+    background: var(--accent-soft);
+  }
+  #drop small { display: block; font-weight: 400; font-size: 12px; opacity: .8; margin-top: 6px; }
 
-  .hidden { display: none; }
-  .spin { display: inline-block; width: 13px; height: 13px; vertical-align: -2px;
-          border: 2px solid currentColor; border-right-color: transparent;
-          border-radius: 50%; animation: spin .7s linear infinite; }
+  .chip {
+    font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--accent-soft); color: var(--accent);
+    padding: 3px 9px; border-radius: 999px; display: inline-block; margin: 2px 3px 0 0;
+  }
+  .chip.bad { background: var(--err-soft); color: var(--err); }
+
+  .spin {
+    display: inline-block; width: 12px; height: 12px; vertical-align: -1px;
+    border: 2px solid currentColor; border-right-color: transparent;
+    border-radius: 50%; animation: spin .6s linear infinite;
+  }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .err { color: #b4342b; }
-  @media (prefers-color-scheme: dark) { .err { color: #f08b82; } }
+  .hidden { display: none !important; }
+  .scrim { display: none; }
+
+  /* ── Narrow: sidebar becomes a drawer ──────────────────────────────────── */
+  @media (max-width: 900px) {
+    .app { grid-template-columns: minmax(0, 1fr); }
+    .side {
+      position: fixed; inset: 0 auto 0 0; width: 292px; z-index: 30;
+      transform: translateX(-100%); transition: transform 320ms var(--ease-drawer);
+    }
+    .side.open { transform: translateX(0); }
+    .scrim {
+      display: block; position: fixed; inset: 0; z-index: 20;
+      background: rgba(0,0,0,.35); opacity: 0; visibility: hidden;
+      transition: opacity 320ms var(--ease-out), visibility 320ms;
+    }
+    .scrim.on { opacity: 1; visibility: visible; }
+    .burger { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; }
+    .thread, .composer { padding-left: 14px; padding-right: 14px; }
+  }
+
+  /* Reduced motion means fewer and gentler animations, not zero: keep the
+     opacity and colour changes that aid comprehension, drop the movement. */
+  @media (prefers-reduced-motion: reduce) {
+    .thread { scroll-behavior: auto; }
+    .msg { transition: opacity 200ms ease; transform: none; }
+    @starting-style { .msg { transform: none; } }
+    .btn:active, .cite:active, .send:active { transform: none; }
+    .side { transition: none; }
+    .skel i { animation: none; opacity: .6; }
+    #drop { transform: none; }
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <h1>Ask My Docs</h1>
-    <div id="status">checking…</div>
-    <label id="tokenbox" class="hidden" title="Bearer token. What it grants decides which documents you can retrieve.">
-      token <input id="token" type="password" placeholder="paste your token" autocomplete="off">
-    </label>
-  </header>
+<div class="app">
+  <aside class="side" id="side">
+    <div class="brand">
+      <div class="mark" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+             stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3.2 2.4h6l3.6 3.6v7.6H3.2z"/><path d="M9 2.4V6h3.8"/><path d="M5.6 9h4.8M5.6 11.2h3"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-name">Ask My Docs</div>
+        <div class="brand-sub">grounded answers, with citations</div>
+      </div>
+    </div>
 
-  <form id="f">
-    <input id="q" type="text" placeholder="Ask a question about the indexed documents…" autocomplete="off" autofocus>
-    <button id="go" type="submit">Ask</button>
-  </form>
-  <div class="opts">
-    <label title="Tags applied to documents you upload. What you may RETRIEVE is decided by your token, not by this box.">
-      Upload ACL <input id="acl" type="text" placeholder="finance,hr" autocomplete="off">
-    </label>
-    <label title="Bypass the semantic cache."><input id="nocache" type="checkbox"> no cache</label>
-  </div>
+    <div class="side-scroll">
+      <div class="sec"><h2>Corpus</h2><span class="sec-note" id="docstate"></span></div>
+      <div class="group" id="doclist"></div>
+      <div class="row">
+        <input id="file" type="file" class="hidden" multiple
+               accept=".md,.markdown,.txt,.csv,.tsv,.tab,.pdf,.docx,.pptx,.xlsx">
+        <button id="add" class="btn grow" type="button">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+            <path d="M6 2.5v7M2.5 6h7"/>
+          </svg>
+          Add files
+        </button>
+        <button id="reindex" class="btn grow" type="button"
+                title="Index files already in the corpus directory. Documents unchanged since the last run are skipped.">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+            <path d="M10 6a4 4 0 1 1-1.2-2.8"/><path d="M10.4 1.6v2.6H7.8"/>
+          </svg>
+          Re-index
+        </button>
+      </div>
+      <p class="hint" id="uphint">Or drag files anywhere on this page.</p>
 
-  <div class="docs">
-    <input id="file" type="file" class="hidden" multiple
-           accept=".md,.markdown,.txt,.csv,.tsv,.tab,.pdf,.docx,.pptx,.xlsx">
-    <button id="add" class="linkbtn" type="button">+ Add documents</button>
-    <button id="reindex" class="linkbtn" type="button"
-            title="Index files already in the corpus directory. Documents unchanged since the last run are skipped.">Re-index corpus</button>
-    <span id="docstate">— or drag files anywhere on this page</span>
-  </div>
-  <div id="doclist"></div>
+      <div class="sec"><h2>Pipeline</h2></div>
+      <div class="group">
+        <div class="stage"><label for="llm-sel">generate</label><select class="sel" id="llm-sel"></select></div>
+        <div class="stage"><label for="verify-sel">verify</label><select class="sel" id="verify-sel"></select></div>
+      </div>
+      <p class="hint" id="fixednote"></p>
 
-  <div class="stages">
-    <span class="stage"><label for="llm-sel">generate</label><select id="llm-sel"></select></span>
-    <span class="stage"><label for="verify-sel">verify</label><select id="verify-sel"></select></span>
-    <span id="fixednote" class="stage-note"></span>
-  </div>
+      <div class="sec"><h2>Options</h2></div>
+      <div class="group">
+        <div class="opt">
+          <label class="opt-label" for="acl">Upload ACL</label>
+          <!-- readonly, and only until you click it. The token box below is a
+               type=password field, which makes Chrome offer a saved username in
+               the nearest text input — here — silently tagging uploads with an
+               email address. Neither autocomplete="off" nor an unrecognised
+               token stops it; both are advisory. Chrome does not autofill a
+               readonly field, and dropping the attribute on first focus leaves
+               the control behaving normally. -->
+          <input id="acl" class="field" type="text" placeholder="finance,hr" readonly autocomplete="amd-acl"
+                 title="Tags applied to documents you upload. What you may RETRIEVE is decided by your token, not by this box.">
+        </div>
+        <div class="opt">
+          <label class="switch" title="Bypass the semantic cache.">
+            <span class="opt-label" style="margin:0">Bypass cache</span>
+            <input id="nocache" type="checkbox"><span class="track"></span>
+          </label>
+        </div>
+      </div>
+      <p class="hint">Uploads are tagged with the ACL above. Retrieval is scoped by your token — never by this panel.</p>
+    </div>
 
-  <div id="out"></div>
+    <div class="side-foot">
+      <dl class="stat" id="stats"><dt>status</dt><dd>checking…</dd></dl>
+      <label id="tokenbox" class="hidden">
+        <span class="opt-label">Bearer token</span>
+        <input id="token" class="field" type="password" placeholder="paste your token" autocomplete="off"
+               title="What this token grants decides which documents you can retrieve.">
+      </label>
+    </div>
+  </aside>
+
+  <div class="scrim" id="scrim"></div>
+
+  <main class="main">
+    <div class="topbar">
+      <button class="btn burger" id="burger" type="button" aria-label="Show panel">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+          <path d="M2 3.5h10M2 7h10M2 10.5h10"/>
+        </svg>
+      </button>
+      <h1>Conversation</h1>
+      <span class="pill" id="pill"><span class="dot" id="dot"></span><span id="pilltext">connecting…</span></span>
+    </div>
+
+    <div class="thread" id="thread">
+      <div class="thread-inner" id="threadInner">
+        <div class="empty" id="empty">
+          <h2>Ask a question about your documents</h2>
+          <p>Every claim comes back with the chunk it was drawn from. If the corpus does not
+             support an answer, the pipeline refuses rather than guessing.</p>
+          <div class="flow" id="flow"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="composer">
+      <form id="f">
+        <textarea id="q" rows="1" placeholder="Ask a question about the indexed documents…"
+                  autocomplete="off" autofocus></textarea>
+        <button class="send" id="go" type="submit" aria-label="Ask">
+          <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M7.5 12.5v-10M3.5 6.5l4-4 4 4"/>
+          </svg>
+        </button>
+      </form>
+      <div class="foot"><kbd>Enter</kbd> to ask · <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line</div>
+    </div>
+  </main>
 </div>
 
-<div id="drop">Drop Word, PowerPoint, Excel, Markdown or text files to index them</div>
+<div id="drop"><div>Drop files to index them<small>Word, PowerPoint, Excel, PDF, Markdown, CSV or text</small></div></div>
 
 <script>
 const $ = s => document.querySelector(s);
+const el = (t, c, txt) => { const n = document.createElement(t); if (c) n.className = c; if (txt != null) n.textContent = txt; return n; };
+const svg = (paths, size = 12) =>
+  `<svg width="${size}" height="${size}" viewBox="0 0 12 12" fill="none" stroke="currentColor"
+        stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
 
 // api wraps fetch so the bearer token is attached in exactly one place. A 401
 // reveals the token box rather than reporting a failure: on an unauthenticated
@@ -223,25 +542,45 @@ const api = async (url, opts = {}) => {
   }
   return r;
 };
-const el = (t, c, txt) => { const n = document.createElement(t); if (c) n.className = c; if (txt != null) n.textContent = txt; return n; };
 
 // Stage colours are fixed so the same stage is the same colour every query —
-// the shape of the bar becomes recognisable at a glance.
+// the shape of the timing bar becomes recognisable at a glance.
 const STAGES = [
   ['embed',    '#7aa2c8'], ['retrieve', '#6fc297'], ['rerank',   '#e0b256'],
   ['generate', '#b48ad4'], ['verify',   '#d4907a'],
 ];
 
+// The empty state names the pipeline rather than inventing example questions —
+// the corpus decides what is worth asking, and this page does not know it.
+$('#flow').replaceChildren(...STAGES.flatMap(([name, colour], i) => {
+  const b = el('b', null, name);
+  b.style.color = colour;
+  return i ? [el('s', null, '→'), b] : [b];
+}));
+
+// ── Server state ───────────────────────────────────────────────────────────
+
 function refreshStatus() {
   return fetch('/healthz').then(r => r.json()).then(h => {
-    $('#status').innerHTML =
-      `<b>${h.provider}</b> · ${h.llm} · rerank ${h.reranker} · gate ${h.gate} · ${h.chunks} chunks`;
-  }).catch(() => { $('#status').textContent = 'server unreachable'; });
+    $('#stats').replaceChildren(...[
+      ['provider', `<b>${h.provider}</b>`], ['model', h.llm], ['rerank', h.reranker],
+      ['gate', h.gate], ['indexed', `${h.chunks} chunks`],
+    ].flatMap(([k, v]) => {
+      const dd = el('dd'); dd.innerHTML = v;
+      return [el('dt', null, k), dd];
+    }));
+    $('#dot').classList.remove('down');
+    $('#pilltext').textContent = `${h.llm} · ${h.chunks} chunks`;
+  }).catch(() => {
+    $('#stats').replaceChildren(el('dt', null, 'status'), el('dd', null, 'unreachable'));
+    $('#dot').classList.add('down');
+    $('#pilltext').textContent = 'server unreachable';
+  });
 }
 
 // The indexed corpus is server state, so it is rendered from /documents on
-// every load rather than only after an upload. Previously a refresh left the
-// page looking empty even though the documents were still indexed.
+// every load rather than only after an upload. Otherwise a refresh leaves the
+// page looking empty even though the documents are still indexed.
 function listDocs() {
   return api('/documents').then(r => r.json()).then(d => {
     const docs = d.documents || [];
@@ -249,23 +588,23 @@ function listDocs() {
     list.replaceChildren();
 
     if (!docs.length) {
-      $('#docstate').textContent = '— index is empty, add documents to ask anything';
+      $('#docstate').textContent = 'empty';
+      list.append(el('div', 'empty-note', 'Nothing indexed yet — add a document to ask anything.'));
       return;
     }
     const total = docs.reduce((n, x) => n + (x.chunks || 0), 0);
-    $('#docstate').textContent =
-      `— ${docs.length} document${docs.length === 1 ? '' : 's'}, ${total} chunks indexed`;
+    $('#docstate').textContent = `${docs.length} · ${total} chunks`;
 
     for (const doc of docs) {
       const row = el('div', 'doc');
-      row.append(el('span', 'doc-name', doc.name));
+      const name = el('span', 'doc-name', doc.name);
+      name.title = doc.name;
+      row.append(name);
       // A file on disk with zero chunks was saved but never indexed. Say so
       // plainly — it is otherwise invisible and looks like a retrieval bug.
-      if (doc.chunks > 0) {
-        row.append(el('span', 'doc-meta', `${doc.chunks} chunk${doc.chunks === 1 ? '' : 's'}`));
-      } else {
-        row.append(el('span', 'doc-meta bad', 'not indexed — run ingest'));
-      }
+      row.append(doc.chunks > 0
+        ? el('span', 'doc-meta', `${doc.chunks}`)
+        : Object.assign(el('span', 'doc-meta bad', 'not indexed'), { title: 'Saved but never indexed — run Re-index' }));
       row.append(el('span', 'doc-meta', fmtBytes(doc.bytes)));
       list.append(row);
     }
@@ -278,7 +617,7 @@ function fmtBytes(n) {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-// --- Switching backends ---------------------------------------------------
+// ── Switching backends ─────────────────────────────────────────────────────
 // Generation and verification are stateless, so they can be swapped while the
 // server runs. Embeddings deliberately cannot: the index holds vectors from one
 // model, and changing it would not error — it would silently retrieve nonsense.
@@ -287,12 +626,12 @@ function loadProviders() {
   return api('/providers').then(r => r.json()).then(p => {
     fillStage('#llm-sel', 'llm', p);
     fillStage('#verify-sel', 'verify', p);
-    $('#fixednote').textContent = 'embeddings: ' + (p.fixed?.embeddings || '');
+    $('#fixednote').textContent = 'Embeddings: ' + (p.fixed?.embeddings || '');
   }).catch(err => {
     // Do not swallow this. An empty dropdown with no explanation looks like
     // "no models available" when it is actually a bug in this page.
     console.error('loadProviders failed', err);
-    $('#fixednote').textContent = 'could not load backends: ' + err.message;
+    $('#fixednote').textContent = 'Could not load backends: ' + err.message;
   });
 }
 
@@ -302,15 +641,14 @@ function fillStage(id, stage, p) {
   sel.replaceChildren();
 
   for (const [provider, info] of Object.entries(p.available || {})) {
+    const og = el('optgroup');
     if (!info.ready) {
       // Show why an option is missing instead of silently omitting it.
-      const og = el('optgroup');
       og.label = `${provider} — ${info.reason || 'unavailable'}`;
       og.disabled = true;
       sel.append(og);
       continue;
     }
-    const og = el('optgroup');
     og.label = provider;
     for (const m of info.models || []) {
       const o = el('option', null, m);
@@ -338,13 +676,15 @@ function fillStage(id, stage, p) {
       // Put the control back where it was: leaving it showing a model the
       // server rejected would misreport what is actually running.
       if (previous) sel.value = previous;
-      $('#docstate').replaceChildren(el('span', 'chipfile bad', `switch failed: ${err.message}`));
+      note(`switch failed: ${err.message}`, true);
     } finally {
       sel.disabled = false;
     }
   };
   sel.dataset.current = sel.value;
 }
+
+$('#acl').addEventListener('focus', e => e.target.removeAttribute('readonly'), { once: true });
 
 $('#token').onchange = async () => {
   const v = $('#token').value.trim();
@@ -360,9 +700,24 @@ refreshStatus();
 listDocs();
 loadProviders();
 
-// --- Adding documents -----------------------------------------------------
+// ── Sidebar drawer (narrow viewports only) ─────────────────────────────────
+const drawer = open => {
+  $('#side').classList.toggle('open', open);
+  $('#scrim').classList.toggle('on', open);
+};
+$('#burger').onclick = () => drawer(!$('#side').classList.contains('open'));
+$('#scrim').onclick = () => drawer(false);
+addEventListener('keydown', e => { if (e.key === 'Escape') drawer(false); });
+
+// ── Adding documents ───────────────────────────────────────────────────────
 // Files are uploaded, written into the corpus directory server-side, and
 // indexed in the same request.
+
+const hint = $('#uphint');
+function note(msg, bad) {
+  hint.replaceChildren(bad ? el('span', 'chip bad', msg) : document.createTextNode(msg));
+}
+const resetHint = () => note('Or drag files anywhere on this page.');
 
 $('#add').onclick = () => $('#file').click();
 $('#reindex').onclick = () => reindex();
@@ -374,8 +729,8 @@ addEventListener('dragenter', e => {
   e.preventDefault(); dragDepth++; $('#drop').classList.add('on');
 });
 addEventListener('dragover', e => { if (dragDepth) e.preventDefault(); });
-// dragleave fires when crossing child elements too, so count enters and
-// leaves rather than hiding on the first one.
+// dragleave fires when crossing child elements too, so count enters and leaves
+// rather than hiding on the first one.
 addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; $('#drop').classList.remove('on'); } });
 addEventListener('drop', e => {
   if (!e.dataTransfer?.files?.length) return;
@@ -383,30 +738,31 @@ addEventListener('drop', e => {
   upload(e.dataTransfer.files);
 });
 
+function busy(on, label) {
+  $('#reindex').disabled = $('#add').disabled = on;
+  if (on) hint.innerHTML = `<span class="spin"></span>&nbsp; ${label}`;
+}
+
 // Indexes what is already in the corpus directory, for files that did not
-// arrive through this page. Unchanged documents are skipped server-side, so
-// the usual outcome is "nothing to do" in milliseconds — and saying that
-// plainly is better than a success message implying work was done.
+// arrive through this page. Unchanged documents are skipped server-side, so the
+// usual outcome is "nothing to do" in milliseconds — and saying that plainly is
+// better than a success message implying work was done.
 async function reindex() {
-  const state = $('#docstate');
-  const btn = $('#reindex');
-  btn.disabled = $('#add').disabled = true;
-  state.innerHTML = '<span class="spin"></span> &nbsp;indexing the corpus directory — this can take a while on a large document…';
+  busy(true, 'indexing the corpus directory…');
   try {
     const acl = $('#acl').value.trim();
     const r = await api('/ingest' + (acl ? '?acl=' + encodeURIComponent(acl) : ''), { method: 'POST' });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || r.statusText);
     await Promise.all([refreshStatus(), listDocs()]);
-    state.replaceChildren(document.createTextNode(
-      d.indexed
-        ? `— indexed ${d.indexed} document${d.indexed === 1 ? '' : 's'}, ${d.chunks_added} chunks` +
-          (d.skipped ? ` (${d.skipped} unchanged)` : '')
-        : `— nothing to do, all ${d.skipped} document${d.skipped === 1 ? '' : 's'} already current`));
+    note(d.indexed
+      ? `Indexed ${d.indexed} document${d.indexed === 1 ? '' : 's'}, ${d.chunks_added} chunks` +
+        (d.skipped ? ` (${d.skipped} unchanged).` : '.')
+      : `Nothing to do — all ${d.skipped} document${d.skipped === 1 ? '' : 's'} already current.`);
   } catch (err) {
-    state.replaceChildren(Object.assign(el('span', 'chipfile bad'), { textContent: err.message }));
+    note(err.message, true);
   } finally {
-    btn.disabled = $('#add').disabled = false;
+    busy(false);
   }
 }
 
@@ -414,10 +770,7 @@ async function upload(fileList) {
   const files = [...(fileList || [])];
   if (!files.length) return;
 
-  const state = $('#docstate');
-  $('#add').disabled = true;
-  state.innerHTML = `<span class="spin"></span> &nbsp;indexing ${files.length} file${files.length === 1 ? '' : 's'} — chunking, contextualizing and embedding…`;
-
+  busy(true, `indexing ${files.length} file${files.length === 1 ? '' : 's'} — chunking, contextualizing, embedding…`);
   const fd = new FormData();
   for (const f of files) fd.append('files', f, f.name);
   const acl = $('#acl').value.trim();
@@ -428,45 +781,63 @@ async function upload(fileList) {
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || r.statusText);
 
-    // Rejections need to stay visible; successes are about to be shown in the
+    // Rejections need to stay visible; successes are about to show up in the
     // document list, so only surface what went wrong.
-    const failed = (d.results || []).filter(r => r.error);
-    state.replaceChildren();
-    for (const res of failed) {
-      const chip = el('span', 'chipfile bad', `${res.name}: ${res.error}`);
-      chip.title = res.error;
-      state.append(chip, document.createTextNode(' '));
-    }
+    const failed = (d.results || []).filter(x => x.error);
     await Promise.all([refreshStatus(), listDocs()]);
-    if (failed.length) {
-      // listDocs overwrites the state line, so re-assert the failures after it.
-      state.replaceChildren();
-      for (const res of failed) {
-        state.append(el('span', 'chipfile bad', `${res.name}: ${res.error}`), document.createTextNode(' '));
-      }
+    if (!failed.length) { resetHint(); return; }
+    hint.replaceChildren();
+    for (const res of failed) {
+      const chip = el('span', 'chip bad', `${res.name}: ${res.error}`);
+      chip.title = res.error;
+      hint.append(chip);
     }
   } catch (err) {
-    state.innerHTML = '';
-    state.append(el('span', 'chipfile bad', 'upload failed: ' + err.message));
+    note('upload failed: ' + err.message, true);
   } finally {
-    $('#add').disabled = false;
+    busy(false);
   }
 }
+resetHint();
+
+// ── Conversation ───────────────────────────────────────────────────────────
+// The thread is client-side only: /query is stateless and each question is
+// answered against the corpus alone, not against what was asked before. Keeping
+// the exchanges on screen is a reading aid, not conversational memory.
+
+const thread = $('#thread'), inner = $('#threadInner');
+let seq = 0;
+
+const scrollDown = () => thread.scrollTo({ top: thread.scrollHeight });
+
+const textarea = $('#q');
+const autoGrow = () => { textarea.style.height = 'auto'; textarea.style.height = textarea.scrollHeight + 'px'; };
+textarea.addEventListener('input', autoGrow);
+textarea.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#f').requestSubmit(); }
+});
 
 $('#f').addEventListener('submit', async e => {
   e.preventDefault();
-  const question = $('#q').value.trim();
-  if (!question) return;
+  const question = textarea.value.trim();
+  if (!question || $('#go').disabled) return;
 
-  const out = $('#out');
+  $('#empty')?.remove();
+  textarea.value = ''; autoGrow();
   $('#go').disabled = true;
-  out.replaceChildren(Object.assign(el('div', 'card'), {
-    innerHTML: '<span class="spin"></span> &nbsp;retrieving, reranking, generating, verifying…'
-  }));
 
-  // No acl here on purpose. The server takes the caller's tags from their
-  // token and discards anything the body claims, so sending one would only
-  // suggest this box still decides what you can read. It does not.
+  const mine = el('div', 'msg me');
+  mine.append(el('p', null, question));
+  const pending = el('div', 'msg');
+  pending.append(Object.assign(el('div', 'card skel'), {
+    innerHTML: '<i></i><i></i><i></i><div class="skel-label">retrieving, reranking, generating, verifying…</div>',
+  }));
+  inner.append(mine, pending);
+  scrollDown();
+
+  // No acl here on purpose. The server takes the caller's tags from their token
+  // and discards anything the body claims, so sending one would only suggest
+  // the Options box still decides what you can read. It does not.
   try {
     const r = await api('/query', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -474,17 +845,20 @@ $('#f').addEventListener('submit', async e => {
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || r.statusText);
-    render(data);
+    pending.replaceChildren(answerCard(data, ++seq));
   } catch (err) {
-    out.replaceChildren(Object.assign(el('div', 'card err'), { textContent: 'Error: ' + err.message }));
+    const card = el('div', 'card answer');
+    card.append(el('p', 'err-text', 'Error: ' + err.message));
+    pending.replaceChildren(card);
   } finally {
     $('#go').disabled = false;
+    scrollDown();
+    textarea.focus();
   }
 });
 
-function render(d) {
-  const out = $('#out');
-  out.replaceChildren();
+function answerCard(d, id) {
+  const card = el('div', 'card');
 
   // Warnings are how the pipeline explains itself — a dropped citation, a
   // retry, an unentailed claim. Surfacing them turns a bare refusal into a
@@ -495,80 +869,32 @@ function render(d) {
     const ul = el('ul');
     d.warnings.forEach(w => ul.append(el('li', null, w)));
     b.append(ul);
-    out.append(b);
+    card.append(b);
   }
 
-  const card = el('div', 'card answer');
+  const body = el('div', 'answer');
   if (!d.sufficient) {
-    // A refusal is a designed outcome, not a failure — style it as calm, not red.
-    card.append(el('p', 'refusal', d.answer));
+    // A refusal is a designed outcome, not a failure — style it calm, not red.
+    body.append(el('p', 'refusal', d.answer));
   } else {
     for (const c of d.claims || []) {
       const p = el('p');
       p.append(document.createTextNode(c.text));
-      for (const id of c.citations || []) {
-        const chip = el('span', 'cite', id);
-        chip.tabIndex = 0;
-        chip.title = 'Show this source';
-        const jump = () => {
-          const t = document.getElementById('src-' + id);
-          if (!t) return;
-          t.scrollIntoView({ block: 'center' });
-          // Restart the animation with a synchronous reflow rather than
-          // requestAnimationFrame: rAF is throttled to nothing in a background
-          // tab, so the highlight would silently never appear for anyone who
-          // clicks a citation in a tab that is not frontmost.
-          t.classList.remove('flash');
-          void t.offsetWidth;
-          t.classList.add('flash');
-        };
-        chip.onclick = jump;
-        chip.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); jump(); } };
-        p.append(chip);
-      }
-      card.append(p);
+      for (const cid of c.citations || []) p.append(citeChip(cid, id));
+      body.append(p);
     }
   }
-  out.append(card);
-
-  const t = d.timings_ms || {};
-  const tcard = el('div', 'card');
-  if (d.cache_hit) {
-    // On a cache hit every stage after the query embedding is skipped, so a
-    // stage breakdown would be a row of zeros pretending to be a measurement.
-    const s = el('div', 'tlegend');
-    s.append(el('span', null,
-      `served from semantic cache in ${t.total ?? 0}ms — retrieval, reranking, generation and verification all skipped`));
-    s.firstChild.style.color = 'var(--accent)';
-    tcard.append(s);
-  } else {
-    const bar = el('div', 'timings');
-    const legend = el('div', 'tlegend');
-    for (const [name, colour] of STAGES) {
-      const ms = t[name] || 0;
-      if (ms > 0) {
-        const seg = el('div');
-        seg.style.cssText = `background:${colour};flex:${ms}`;
-        seg.title = `${name}: ${ms}ms`;
-        bar.append(seg);
-      }
-      const s = el('span', null, `${name} ${ms}ms`);
-      s.style.color = colour;
-      legend.append(s);
-    }
-    const foot = el('div', 'tlegend');
-    foot.style.marginTop = '8px';
-    foot.append(el('span', null, `total ${t.total ?? 0}ms`));
-    foot.firstChild.style.color = 'var(--muted)';
-    tcard.append(bar, legend, foot);
-  }
-  out.append(tcard);
+  card.append(body, timings(d));
 
   if (d.sources?.length) {
-    out.append(el('h2', null, `Sources passed to the model (${d.sources.length})`));
+    const det = el('details', 'srcs');
+    const sum = el('summary');
+    sum.innerHTML = svg('<path d="M4.5 2.5L8 6l-3.5 3.5"/>').replace('<svg', '<svg class="caret"');
+    sum.append(document.createTextNode(`${d.sources.length} source${d.sources.length === 1 ? '' : 's'} passed to the model`));
+    const wrap = el('div', 'srcs-body');
     for (const s of d.sources) {
       const box = el('div', 'src');
-      box.id = 'src-' + s.chunk_id;
+      box.id = `src-${id}-${s.chunk_id}`;
       const head = el('div', 'src-head');
       head.append(el('span', 'src-id', s.chunk_id), el('span', 'src-sec', s.section || s.doc_id));
       const bar = el('div', 'bar');
@@ -577,9 +903,66 @@ function render(d) {
       bar.append(Object.assign(el('i'), { style: `width:${Math.sqrt(Math.max(0, Math.min(1, s.score))) * 100}%` }));
       head.append(bar, el('span', 'score', s.score.toFixed(3)));
       box.append(head, el('p', 'src-text', s.text));
-      out.append(box);
+      wrap.append(box);
     }
+    det.append(sum, wrap);
+    card.append(det);
   }
+  return card;
+}
+
+function citeChip(cid, id) {
+  const chip = el('span', 'cite', cid);
+  chip.tabIndex = 0;
+  chip.title = 'Show this source';
+  const jump = () => {
+    const t = document.getElementById(`src-${id}-${cid}`);
+    if (!t) return;
+    t.closest('details')?.setAttribute('open', '');   // a collapsed panel cannot be scrolled to
+    t.scrollIntoView({ block: 'center' });
+    // Restart the highlight with a synchronous reflow rather than
+    // requestAnimationFrame: rAF is throttled to nothing in a background tab,
+    // so the flash would silently never appear for anyone clicking a citation
+    // in a tab that is not frontmost.
+    t.classList.remove('flash');
+    void t.offsetWidth;
+    t.classList.add('flash');
+    setTimeout(() => t.classList.remove('flash'), 1200);
+  };
+  chip.onclick = jump;
+  chip.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); jump(); } };
+  return chip;
+}
+
+function timings(d) {
+  const t = d.timings_ms || {};
+  const box = el('div', 'meta');
+  if (d.cache_hit) {
+    // On a cache hit every stage after the query embedding is skipped, so a
+    // stage breakdown would be a row of zeros pretending to be a measurement.
+    const legend = el('div', 'tlegend');
+    legend.append(el('span', 'cachehit',
+      `served from semantic cache in ${t.total ?? 0}ms — retrieval, reranking, generation and verification all skipped`));
+    box.append(legend);
+    return box;
+  }
+  const bar = el('div', 'timings');
+  const legend = el('div', 'tlegend');
+  for (const [name, colour] of STAGES) {
+    const ms = t[name] || 0;
+    if (ms > 0) {
+      const seg = el('div');
+      seg.style.cssText = `background:${colour};flex:${ms}`;
+      seg.title = `${name}: ${ms}ms`;
+      bar.append(seg);
+    }
+    const s = el('span', null, `${name} ${ms}ms`);
+    s.style.color = colour;
+    legend.append(s);
+  }
+  legend.append(el('span', 'total', `${t.total ?? 0}ms`));
+  box.append(bar, legend);
+  return box;
 }
 </script>
 </body>
