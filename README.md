@@ -172,8 +172,8 @@ unpack it, and you have the binary **plus** the files it needs to run:
 `.env.example`, `docker-compose.yml`, `README.md`, `LICENSE`.
 
 ```bash
-tar -xzf ask-my-docs-v0.11.0-linux-amd64.tar.gz
-cd ask-my-docs-v0.11.0-linux-amd64
+tar -xzf ask-my-docs-v0.12.0-linux-amd64.tar.gz
+cd ask-my-docs-v0.12.0-linux-amd64
 sha256sum -c --ignore-missing SHA256SUMS.txt   # optional, verify the download
 ./ask-my-docs version
 ```
@@ -507,26 +507,43 @@ the query path never learns the difference.
 compiled into the binary with `go:embed` — no npm, no build step, no separate
 process to deploy.
 
+The layout separates what you *configure* from what you *ask*. A left panel
+holds three sections — **Corpus**, **Pipeline**, **Options** — and the right
+column is a thread of exchanges.
+
+> [!IMPORTANT]
+> The thread is a reading aid, not conversational memory. `/query` is
+> stateless: every question is answered against the corpus alone, never against
+> what was asked before. Follow-ups like "and the second one?" will not resolve.
+
 It surfaces the things this pipeline works hard to produce and a plain chat box
 would throw away:
 
-- **Clickable citations** — clicking a claim's source id scrolls to that chunk
-  and highlights it. The grounding is the product, so it is the most clickable
-  thing on the page.
+- **Clickable citations** — clicking a claim's source id opens the sources
+  panel, scrolls to that chunk and flashes it. The grounding is the product, so
+  it is the most clickable thing on the page.
+- **Sources actually passed to the model**, with rerank scores, behind a
+  disclosure so ten chunks do not bury the answer. `TOP_K` is a ceiling and
+  sub-threshold chunks are dropped, so this is usually fewer than 10.
 - **Per-stage timings** as a proportional bar — the same numbers that made
-  every optimisation in this project legible.
-- **Sources actually passed to the model**, with rerank scores. `TOP_K` is a
-  ceiling and sub-threshold chunks are dropped, so this is usually fewer than 10.
+  every optimisation in this project legible. On a semantic-cache hit the
+  breakdown is replaced by a single line, because a row of zeros would be
+  pretending to be a measurement.
 - **Pipeline notes** — dropped citations, generator retries, unentailed claims.
   A refusal comes with the reason it refused.
+- **Corpus** lists every indexed document with its chunk count. A file on disk
+  with zero chunks is marked `not indexed` rather than left invisible.
 - **Re-index corpus** — indexes files that are in `corpus/` but did not arrive
   through this page: copied in, restored from a backup, written by a sync job.
-  The document list marks those `not indexed — run ingest`, and this is the
-  button that acts on it. Unchanged documents are skipped, so the usual outcome
-  is "nothing to do" in milliseconds.
-- **Runtime provider/model switching** for the generate and verify stages,
-  grouped by provider, with unavailable providers shown *alongside the reason*
-  rather than hidden.
+  Unchanged documents are skipped, so the usual outcome is "nothing to do" in
+  milliseconds.
+- **Pipeline** switches provider and model for the generate and verify stages at
+  runtime, grouped by provider, with unavailable providers shown *alongside the
+  reason* rather than hidden.
+- **Options** carries the upload ACL and a cache bypass. The ACL tags documents
+  you upload; it does **not** decide what you may retrieve — that comes from
+  your token, and the `acl` field of a query body is discarded rather than
+  merged.
 
 **Embeddings are deliberately not switchable at runtime.** The index holds
 vectors from one specific model; changing it would not raise an error, it would
@@ -536,9 +553,18 @@ that changing it requires re-indexing.
 Refusals render as calm and italic rather than as errors, because they are a
 designed outcome of the guards, not a fault.
 
+Keyboard: `Enter` asks, `Shift`+`Enter` starts a new line. Below 900px the left
+panel becomes a drawer.
+
+Motion is budgeted rather than decorative — 160ms press feedback, a 320ms
+message entrance, and nothing else moves. The timing bar and the score bars
+deliberately do not animate, because they are data being read rather than
+chrome. `prefers-reduced-motion` drops the movement and keeps the fades.
+
 ## Document formats
 
-Drag files onto the page, use *+ Add documents*, or drop them in `corpus/`.
+Drag files anywhere onto the page, use *+ Add files*, or drop them in `corpus/`
+and press *Re-index*.
 
 | Type | Handling |
 |---|---|
@@ -1130,9 +1156,15 @@ Deliberately deferred:
   query path.
 
 Known gaps that are **not** deliberate, in case this is being read as a
-finished system: deleting a file from `corpus/` does not remove it from the
-index, and nothing here has been run against a corpus larger than a few
-hundred chunks.
+finished system:
+
+- Deleting a file from `corpus/` does not remove it from the index.
+- Every quality number in this README was measured on a few hundred chunks.
+  Larger indexes work, but nothing above has been re-measured on one, and
+  retrieval quality does not carry across corpus sizes for free.
+- No load or concurrency testing. The latency figures describe sparse traffic
+  from a single caller; free provider tiers throttle well before the pipeline
+  itself becomes the limit.
 
 ## License
 
