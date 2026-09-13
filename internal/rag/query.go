@@ -344,7 +344,7 @@ func (a *App) verifyClaims(ctx context.Context, claims []Claim, valid map[string
 			if ev.Len() > 0 {
 				ev.WriteString("\n\n")
 			}
-			fmt.Fprintf(&ev, "[%s] %s", cid, escapeForPrompt(src.Text))
+			fmt.Fprintf(&ev, "[%s] %s", cid, escapeForPrompt(flagInjectionAttempts(src.Text)))
 		}
 		// The claim is the generator's own output, but answerSystem tells it to
 		// quote sources verbatim — so attacker text smuggled into a source can
@@ -452,7 +452,7 @@ func (a *App) RetrieveAndRank(ctx context.Context, question string, qvec []float
 		// Escaped for the same reason FormatSources escapes it: a hosted
 		// cross-encoder just scores tokens and doesn't care, but Ollama's
 		// LLM-based reranker (see ollama.go) reads this inside a real prompt.
-		docs[i] = escapeForPrompt(strings.TrimSpace(str(h.Payload["context"]) + "\n\n" + st.Candidates[i].Text))
+		docs[i] = escapeForPrompt(flagInjectionAttempts(strings.TrimSpace(str(h.Payload["context"]) + "\n\n" + st.Candidates[i].Text)))
 	}
 
 	if a.off("rerank") {
