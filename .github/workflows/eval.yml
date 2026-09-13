@@ -118,21 +118,39 @@ jobs:
       # idea of "latest".
       #
       # meta/llama-3.1-70b-instruct hit NVIDIA's own end-of-life on
-      # 2026-08-26 and started returning 410 Gone; mistral-nemotron replaces
-      # it as the pin. Pinning still does not mean permanent: NVIDIA retires
-      # NIM-hosted models on their own schedule, and this CI account is only
-      # entitled to a subset of the catalog (most models 404 with "Function
-      # ... Not found for account"), so a future retirement needs the same
-      # check — confirm the account can actually invoke the replacement
-      # (`curl .../v1/chat/completions`) before pinning it, not just that it
-      # appears in `GET /v1/models`.
-      NVIDIA_MODEL: mistralai/mistral-nemotron
+      # 2026-08-26 and started returning 410 Gone. Pinning still does not
+      # mean permanent: NVIDIA retires NIM-hosted models on their own
+      # schedule, and this CI account is only entitled to a subset of the
+      # catalog (most models 404 with "Function ... Not found for account"),
+      # so a future retirement needs the same check this one got — confirm
+      # the account can actually invoke the replacement, with a request
+      # shaped like this pipeline's real ones (a system prompt plus a few
+      # sources plus strict json_schema, not a bare "reply with ok"), before
+      # pinning it. mistralai/mistral-nemotron looked like the obvious
+      # replacement and passed a trivial smoke test in seconds — then hung
+      # past 60s with no response on the real Answer()-shaped request, empty
+      # response body, timing out five separate ways (json_schema,
+      # json_object, and even a bare chat completion with no format
+      # constraint at all). That is a strictly worse failure mode than 410:
+      # a dead model fails one HTTP call immediately, a hanging one occupies
+      # this job for however long maxAttempts x the client's 5-minute
+      # timeout allows, which is what actually happened before this pin.
+      NVIDIA_MODEL: openai/gpt-oss-20b
       # A verifier that is the model which wrote the claim is the weakest form
       # of a check whose entire purpose is independence.
       #
       # minimaxai/minimax-m3 hit end-of-life on 2026-09-09 (the same 410
-      # shape as above); gpt-oss-20b replaces it — different lineage from the
-      # generator on purpose, same reason as the comment above it.
+      # shape as above). Its replacement should be a different model family
+      # from NVIDIA_MODEL for exactly the independence reason above, but of
+      # everything this account can actually invoke without hanging or
+      # burning its token budget on unbounded reasoning before ever emitting
+      # the schema (deepseek-v4-flash-0731 and glm-5.3-flash both did,
+      # confirmed against this pipeline's real Verify()-shaped request),
+      # gpt-oss-20b was the only one confirmed fast and correct. Sharing one
+      # model across both stages is a real loss, forced by this account's
+      # narrow entitlements rather than chosen — the fix is either broader
+      # NVIDIA access or a second provider's key added to this workflow's
+      # secrets, not a different NVIDIA model name.
       VERIFY_MODEL: openai/gpt-oss-20b
       QDRANT_URL: http://localhost:6333
       QDRANT_COLLECTION: ci_fixtures
