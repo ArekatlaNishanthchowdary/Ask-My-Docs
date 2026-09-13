@@ -1,7 +1,9 @@
-# Build output
-ask-my-docs
-ask-my-docs.exe
-ask-my-docs.exe~
+# Build output. Anchored to the repo root: an unanchored "ask-my-docs" also
+# matches cmd/ask-my-docs/, the source directory the package split created,
+# which made git start refusing `git add` on tracked files in there.
+/ask-my-docs
+/ask-my-docs.exe
+/ask-my-docs.exe~
 
 # Secrets. Never commit this — .env.example is the template.
 .env
