@@ -1074,33 +1074,37 @@ vectors, RRF fusion and ACL filtering using synthetic vectors — no API keys.
 
 ## Project layout
 
+Five packages, not the six a purely conceptual grouping would suggest.
+`App` — the pipeline (`Query`), ingest (`IngestDoc`/`IngestDir`) and
+measurement (`RunEval`/`Calibrate`) methods together — is one Go type with
+methods spread across query.go, ingest.go, eval.go and ablate.go, and Go
+requires a type and all its methods to share a package. Splitting pipeline
+from measurement would mean decomposing that struct into composed services;
+until that's worth doing, `internal/rag` is honestly one package because it is
+one type.
+
 ```
-├─ pipeline
-│  query.go           the query pipeline and its three guards
-│  ingest.go          chunking, contextualization, indexing
-│  qdrant.go          collections, hybrid search, RRF
-│  rerank_tei.go      cross-encoder client
-├─ extraction
-│  office.go          docx/pptx/xlsx extraction (stdlib only)
-│  charts.go          OOXML plotted-series cache → markdown tables
-│  tabular.go         csv/tsv → markdown tables
-│  pdf.go             page text, reading order, line grouping
-├─ providers
-│  ollama.go          local provider
-│  openai_compat.go   any OpenAI-compatible endpoint
-│  embed_compat.go    OpenAI-compatible embeddings
-│  claude.go          Anthropic provider
-│  providers.go       Voyage, tokenizer, shared types
-├─ measurement
-│  eval.go            metrics, golden set, CI gate
-│  ablate.go          the stage-by-stage ladder
-├─ boundary
-│  auth.go            principals, bearer tokens, the ACL substitution
-├─ plumbing
-│  main.go            config, wiring, HTTP server, CLI
-│  detect.go          GPU → TEI image selection
-│  ui.html            the entire frontend
+cmd/ask-my-docs/       CLI dispatch, HTTP routes, concrete-provider wiring
+  main.go
+  detect.go            GPU → TEI image selection
+  ui.html              the entire frontend
+internal/
+  rag/                 pipeline + measurement: App and everything on it
+    query.go             the query pipeline and its three guards
+    ingest.go            chunking, contextualization, indexing
+    eval.go              metrics, golden set, CI gate
+    ablate.go            the stage-by-stage ladder
+    app.go               Config, App, the HTTP auth boundary, backend discovery
+  qdrant/              collections, hybrid search, RRF, sparse-vector wire format
+  extract/             docx/pptx/xlsx/pdf/csv extraction (stdlib only, plus one PDF dep)
+  providers/           ollama, openai-compatible, claude, voyage, TEI reranker
+  auth/                principals, bearer tokens — no App dependency
 ```
+
+`internal/rag` never imports `internal/providers`: every generative and
+embedding backend is reached through the `Embedder`/`LLM` interfaces `rag`
+defines, never a concrete type, so `cmd` is the only package that imports both
+and wires them together.
 
 ## Troubleshooting
 

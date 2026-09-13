@@ -50,7 +50,7 @@ jobs:
           mkdir -p "dist/$name/corpus" "dist/$name/eval"
           go build -trimpath \
             -ldflags "-s -w -X main.version=${{ steps.tag.outputs.ref }}" \
-            -o "dist/$name/ask-my-docs${{ matrix.ext }}" .
+            -o "dist/$name/ask-my-docs${{ matrix.ext }}" ./cmd/ask-my-docs
           # The support files are the difference between "a binary" and
           # "something a stranger can actually run".
           cp README.md LICENSE .env.example docker-compose.yml docker-compose.gpu.yml "dist/$name/"

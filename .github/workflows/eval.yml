@@ -132,7 +132,7 @@ jobs:
           cache: true
 
       - name: Build
-        run: go build -o ask-my-docs .
+        run: go build -o ask-my-docs ./cmd/ask-my-docs
 
       # The gate needs three things, and for most of this repo's life it only
       # checked one of them.
