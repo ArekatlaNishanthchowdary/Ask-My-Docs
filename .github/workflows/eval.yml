@@ -116,10 +116,24 @@ jobs:
       # chose is worse than a startup error naming the variable — so the gate
       # has to name it, and pin it, or the baseline drifts with the provider's
       # idea of "latest".
-      NVIDIA_MODEL: meta/llama-3.1-70b-instruct
+      #
+      # meta/llama-3.1-70b-instruct hit NVIDIA's own end-of-life on
+      # 2026-08-26 and started returning 410 Gone; mistral-nemotron replaces
+      # it as the pin. Pinning still does not mean permanent: NVIDIA retires
+      # NIM-hosted models on their own schedule, and this CI account is only
+      # entitled to a subset of the catalog (most models 404 with "Function
+      # ... Not found for account"), so a future retirement needs the same
+      # check — confirm the account can actually invoke the replacement
+      # (`curl .../v1/chat/completions`) before pinning it, not just that it
+      # appears in `GET /v1/models`.
+      NVIDIA_MODEL: mistralai/mistral-nemotron
       # A verifier that is the model which wrote the claim is the weakest form
       # of a check whose entire purpose is independence.
-      VERIFY_MODEL: minimaxai/minimax-m3
+      #
+      # minimaxai/minimax-m3 hit end-of-life on 2026-09-09 (the same 410
+      # shape as above); gpt-oss-20b replaces it — different lineage from the
+      # generator on purpose, same reason as the comment above it.
+      VERIFY_MODEL: openai/gpt-oss-20b
       QDRANT_URL: http://localhost:6333
       QDRANT_COLLECTION: ci_fixtures
       QDRANT_CACHE_COLLECTION: ci_cache
