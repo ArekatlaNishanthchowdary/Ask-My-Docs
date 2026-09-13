@@ -257,36 +257,63 @@
   .cachehit { color: var(--accent); }
   .cachehit::before { background: var(--accent) !important; }
 
-  /* Sources — a disclosure, not a wall. Native <details> keeps it keyboard
-     accessible for free. */
-  .srcs { border-top: 1px solid var(--line-soft); }
-  .srcs > summary {
-    list-style: none; cursor: pointer; padding: 11px 20px;
-    font-size: 12px; color: var(--muted);
-    display: flex; align-items: center; gap: 8px;
-    transition: color 140ms ease;
+  /* Evidence-first answer layout: claims and the sources that ground them,
+     side by side and linked by hover, so the grounding is read alongside the
+     answer instead of behind a disclosure someone has to think to open. */
+  .ev-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); }
+  .ev-col { padding: 13px 16px 15px; min-width: 0; }
+  .ev-col + .ev-col { border-left: 1px solid var(--line-soft); }
+  .ev-label {
+    font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase;
+    color: var(--faint); font-weight: 650; margin-bottom: 9px;
   }
-  .srcs > summary::-webkit-details-marker { display: none; }
-  @media (hover: hover) and (pointer: fine) { .srcs > summary:hover { color: var(--ink); } }
-  .caret { transition: transform 200ms var(--ease-out); flex: none; }
-  .srcs[open] .caret { transform: rotate(90deg); }
-  .srcs-body { padding: 2px 14px 14px; display: flex; flex-direction: column; gap: 6px; }
 
-  .src {
-    border: 1px solid var(--line); border-radius: var(--r);
-    padding: 11px 13px; background: var(--bg);
-    transition: border-color 240ms var(--ease-out), background 240ms var(--ease-out);
+  .claim {
+    border-left: 2px solid transparent; border-radius: 0 var(--r-sm) var(--r-sm) 0;
+    padding: 7px 9px; margin: 0 0 4px -9px;
+    transition: border-color 160ms var(--ease-out), background 160ms var(--ease-out);
   }
-  .src.flash { border-color: var(--accent); background: var(--accent-soft); }
-  .src-head { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+  .claim.active { border-left-color: var(--accent); background: var(--accent-soft); }
+  .claim p { margin: 0; font-size: 14px; line-height: 1.62; color: var(--ink); }
+  .claim-meta { margin-top: 5px; display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+  .entailed, .withheld-note {
+    font-size: 10.5px; display: inline-flex; align-items: center; gap: 3px; flex: none;
+  }
+  .entailed { color: var(--accent); }
+  .withheld-note { color: var(--warn); }
+  .claim.withheld { border-left-color: var(--warn); background: var(--warn-soft); }
+
+  /* Evidence cards. .src-id/.src-sec/.bar/.score are shared with the citation
+     score display, so both read as the same measurement everywhere. */
+  .evbox {
+    border: 1px solid var(--line); border-radius: var(--r);
+    padding: 9px 11px; margin-bottom: 6px; background: var(--bg);
+    transition: border-color 200ms var(--ease-out), background 200ms var(--ease-out);
+  }
+  .evbox.active, .evbox.flash { border-color: var(--accent); background: var(--accent-soft); }
+  .ev-head { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
   .src-id { font: 600 11.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); flex: none; }
-  .src-sec { font-size: 11.5px; color: var(--faint); flex: 1; min-width: 0;
-             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .bar { width: 44px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; flex: none; }
+  .src-sec { font-size: 11px; color: var(--faint); flex: 1; min-width: 0;
+             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 4px; }
+  .bar { width: 40px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; flex: none; }
   .bar i { display: block; height: 100%; background: var(--accent); }
   .score { font: 11px ui-monospace, monospace; color: var(--faint); flex: none; font-variant-numeric: tabular-nums; }
-  .src-text { font-size: 13px; line-height: 1.6; color: var(--muted); white-space: pre-wrap;
-              margin: 0; max-height: 190px; overflow: auto; overflow-wrap: anywhere; }
+  .snippet { font-size: 12px; line-height: 1.55; color: var(--muted); white-space: pre-wrap;
+             margin: 0; max-height: 150px; overflow: auto; overflow-wrap: anywhere; }
+
+  @media (max-width: 720px) {
+    .ev-grid { grid-template-columns: minmax(0, 1fr); }
+    .ev-col + .ev-col { border-left: 0; border-top: 1px solid var(--line-soft); }
+  }
+
+  /* Compact stats line above the timing bar: what actually gated this answer,
+     built only from numbers the API returns — no invented gate value. */
+  .statline {
+    display: flex; align-items: center; gap: 5px 12px; flex-wrap: wrap;
+    padding: 10px 20px 0; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--muted);
+  }
+  .statline .dim { color: var(--faint); }
 
   /* Loading skeleton. Opacity only — it breathes without costing layout. */
   .skel { padding: 18px 20px; }
@@ -522,9 +549,6 @@
 <script>
 const $ = s => document.querySelector(s);
 const el = (t, c, txt) => { const n = document.createElement(t); if (c) n.className = c; if (txt != null) n.textContent = txt; return n; };
-const svg = (paths, size = 12) =>
-  `<svg width="${size}" height="${size}" viewBox="0 0 12 12" fill="none" stroke="currentColor"
-        stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
 
 // api wraps fetch so the bearer token is attached in exactly one place. A 401
 // reveals the token box rather than reporting a failure: on an unauthenticated
@@ -560,8 +584,16 @@ $('#flow').replaceChildren(...STAGES.flatMap(([name, colour], i) => {
 
 // ── Server state ───────────────────────────────────────────────────────────
 
+// gateFloor is MIN_RERANK_SCORE, the absolute floor healthz exposes — not the
+// per-query effective gate, which also factors in the adaptive relative
+// margin and isn't returned anywhere. The answer card labels it "floor" for
+// exactly that reason, rather than implying it's the number that decided
+// this specific query.
+let gateFloor = null;
+
 function refreshStatus() {
   return fetch('/healthz').then(r => r.json()).then(h => {
+    gateFloor = h.gate;
     $('#stats').replaceChildren(...[
       ['provider', `<b>${h.provider}</b>`], ['model', h.llm], ['rerank', h.reranker],
       ['gate', h.gate], ['indexed', `${h.chunks} chunks`],
@@ -581,9 +613,15 @@ function refreshStatus() {
 // The indexed corpus is server state, so it is rendered from /documents on
 // every load rather than only after an upload. Otherwise a refresh leaves the
 // page looking empty even though the documents are still indexed.
+// corpusDocCount is how many documents the caller can currently see, used to
+// put "N of M docs" next to an answer's source count — real context, not a
+// number invented for the card.
+let corpusDocCount = 0;
+
 function listDocs() {
   return api('/documents').then(r => r.json()).then(d => {
     const docs = d.documents || [];
+    corpusDocCount = docs.length;
     const list = $('#doclist');
     list.replaceChildren();
 
@@ -857,58 +895,143 @@ $('#f').addEventListener('submit', async e => {
   }
 });
 
+// A dropped-claim warning ("dropped claim 3, not entailed by its citations")
+// is the one warning shape worth showing next to the claims themselves rather
+// than in the generic banner — it is what was withheld, and the reader is
+// already looking at what was kept.
+const ENTAILMENT_DROP = /^dropped claim \d+, (.+)$/;
+
 function answerCard(d, id) {
   const card = el('div', 'card');
 
-  // Warnings are how the pipeline explains itself — a dropped citation, a
-  // retry, an unentailed claim. Surfacing them turns a bare refusal into a
-  // diagnosis instead of a shrug.
-  if (d.warnings?.length) {
+  const otherWarnings = [], withheld = [];
+  for (const w of d.warnings || []) {
+    const m = ENTAILMENT_DROP.exec(w);
+    (m ? withheld : otherWarnings).push(m ? m[1] : w);
+  }
+  if (otherWarnings.length) {
     const b = el('div', 'banner');
     b.append(el('strong', null, 'Pipeline notes'));
     const ul = el('ul');
-    d.warnings.forEach(w => ul.append(el('li', null, w)));
+    otherWarnings.forEach(w => ul.append(el('li', null, w)));
     b.append(ul);
     card.append(b);
   }
 
-  const body = el('div', 'answer');
   if (!d.sufficient) {
     // A refusal is a designed outcome, not a failure — style it calm, not red.
+    const body = el('div', 'answer');
     body.append(el('p', 'refusal', d.answer));
-  } else {
-    for (const c of d.claims || []) {
-      const p = el('p');
-      p.append(document.createTextNode(c.text));
-      for (const cid of c.citations || []) p.append(citeChip(cid, id));
-      body.append(p);
+    card.append(body);
+    if (d.refused_by) {
+      const line = el('div', 'statline');
+      line.append(el('span', 'dim', `refused by: ${d.refused_by.replace(/_/g, ' ')}`));
+      card.append(line);
     }
+    card.append(timings(d));
+    return card;
   }
-  card.append(body, timings(d));
 
-  if (d.sources?.length) {
-    const det = el('details', 'srcs');
-    const sum = el('summary');
-    sum.innerHTML = svg('<path d="M4.5 2.5L8 6l-3.5 3.5"/>').replace('<svg', '<svg class="caret"');
-    sum.append(document.createTextNode(`${d.sources.length} source${d.sources.length === 1 ? '' : 's'} passed to the model`));
-    const wrap = el('div', 'srcs-body');
-    for (const s of d.sources) {
-      const box = el('div', 'src');
-      box.id = `src-${id}-${s.chunk_id}`;
-      const head = el('div', 'src-head');
-      head.append(el('span', 'src-id', s.chunk_id), el('span', 'src-sec', s.section || s.doc_id));
-      const bar = el('div', 'bar');
-      // Rerank scores span orders of magnitude, so a linear bar would show
-      // nothing. sqrt keeps low-but-admitted chunks visible.
-      bar.append(Object.assign(el('i'), { style: `width:${Math.sqrt(Math.max(0, Math.min(1, s.score))) * 100}%` }));
-      head.append(bar, el('span', 'score', s.score.toFixed(3)));
-      box.append(head, el('p', 'src-text', s.text));
-      wrap.append(box);
-    }
-    det.append(sum, wrap);
-    card.append(det);
+  const claims = d.claims || [];
+  const sources = d.sources || [];
+
+  const grid = el('div', 'ev-grid');
+  const left = el('div', 'ev-col');
+  left.append(el('div', 'ev-label', 'Claims'));
+
+  for (const c of claims) {
+    const row = el('div', 'claim');
+    row.dataset.src = (c.citations || []).join(' ');
+    row.append(el('p', null, c.text));
+    const meta = el('div', 'claim-meta');
+    // Every claim that reaches the response already passed entailment — the
+    // ones that didn't are the withheld rows below — so this badge states a
+    // fact the pipeline already guarantees, not a fresh judgment call.
+    meta.append(el('span', 'entailed', '✓ entailed'));
+    for (const cid of c.citations || []) meta.append(citeChip(cid, id));
+    row.append(meta);
+    left.append(row);
   }
+  for (const w of withheld) {
+    const row = el('div', 'claim withheld');
+    row.append(el('p', null, w));
+    const meta = el('div', 'claim-meta');
+    meta.append(el('span', 'withheld-note', '⚠ not entailed — withheld'));
+    row.append(meta);
+    left.append(row);
+  }
+  if (!claims.length && !withheld.length) {
+    left.append(el('p', 'refusal', 'No claims.'));
+  }
+
+  const right = el('div', 'ev-col');
+  right.append(el('div', 'ev-label', `Evidence · ${sources.length} source${sources.length === 1 ? '' : 's'}`));
+  for (const s of sources) {
+    const box = el('div', 'evbox');
+    box.id = `src-${id}-${s.chunk_id}`;
+    box.dataset.id = s.chunk_id;
+    const head = el('div', 'ev-head');
+    head.append(el('span', 'src-id', s.chunk_id));
+    const bar = el('div', 'bar');
+    // Rerank scores span orders of magnitude, so a linear bar would show
+    // nothing. sqrt keeps low-but-admitted chunks visible.
+    bar.append(Object.assign(el('i'), { style: `width:${Math.sqrt(Math.max(0, Math.min(1, s.score))) * 100}%` }));
+    head.append(bar, el('span', 'score', s.score.toFixed(3)));
+    box.append(head, el('div', 'src-sec', s.section || s.doc_id), el('p', 'snippet', s.text));
+    right.append(box);
+  }
+  grid.append(left, right);
+  card.append(grid);
+  wireHoverLink(card);
+
+  card.append(statLine(sources), timings(d));
   return card;
+}
+
+// Hover-linking, the point of putting claims and evidence side by side:
+// resting on a claim shows exactly which chunks it leans on, and resting on a
+// chunk shows every claim that cites it — the same link the click-to-scroll
+// citation chip makes, just readable without clicking anything.
+function wireHoverLink(card) {
+  const claims = [...card.querySelectorAll('.claim')].filter(c => c.dataset.src !== undefined);
+  const boxes = [...card.querySelectorAll('.evbox')];
+  const clear = () => { claims.forEach(c => c.classList.remove('active')); boxes.forEach(b => b.classList.remove('active')); };
+  claims.forEach(c => {
+    c.addEventListener('mouseenter', () => {
+      clear();
+      if (!c.dataset.src) return;
+      c.classList.add('active');
+      c.dataset.src.split(' ').forEach(cid => {
+        const b = card.querySelector(`.evbox[data-id="${CSS.escape(cid)}"]`);
+        if (b) b.classList.add('active');
+      });
+    });
+    c.addEventListener('mouseleave', clear);
+  });
+  boxes.forEach(b => {
+    b.addEventListener('mouseenter', () => {
+      clear();
+      b.classList.add('active');
+      claims.forEach(c => { if (c.dataset.src.split(' ').includes(b.dataset.id)) c.classList.add('active'); });
+    });
+    b.addEventListener('mouseleave', clear);
+  });
+}
+
+// The top-scored chunk against the configured floor — real numbers from this
+// response and from /healthz, not the per-query effective gate (which the API
+// never returns, since it also depends on the candidate distribution).
+function statLine(sources) {
+  const line = el('div', 'statline');
+  if (sources.length) {
+    line.append(el('span', null, `top score ${sources[0].score.toFixed(3)}`));
+    if (gateFloor != null) line.append(el('span', 'dim', `· floor ${gateFloor}`));
+    const docs = new Set(sources.map(s => s.doc_id)).size;
+    if (corpusDocCount) {
+      line.append(el('span', 'dim', `· ${docs} of ${corpusDocCount} doc${corpusDocCount === 1 ? '' : 's'} used`));
+    }
+  }
+  return line;
 }
 
 function citeChip(cid, id) {
